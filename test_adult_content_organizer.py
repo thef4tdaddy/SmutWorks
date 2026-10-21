@@ -59,7 +59,7 @@ class OrganizerTests(unittest.TestCase):
 
     def test_no_female_performer_skipped(self):
         self.scene['performers'][0]['gender'] = 'MALE'
-        self.assertEqual(self.plan()[1]['no-female-performer'], 1)
+        self.assertEqual(self.plan()[1]['no-eligible-performer'], 1)
 
     def test_first_female_is_alphabetic_not_assignment_order(self):
         self.scene['performers'] = [{'id': '8', 'name': 'Zed Performer', 'gender': 'FEMALE'}, self.scene['performers'][0]]
@@ -430,7 +430,7 @@ class OrganizationReportTests(unittest.TestCase):
             plan = [{'scene_id': '1', 'file_id': '1', 'source': str(source),
                 'performer': 'Example Performer', 'target': str(base / 'media' / 'ready.mp4')}]
             details = [{'scene_id': '2', 'source': str(source.with_name('needs-info.mp4')),
-                'title': '', 'reason': 'no-title', 'missing': ['title', 'female performer']},
+                'title': '', 'reason': 'no-title', 'missing': ['title', 'performer matching organization settings']},
                 {'scene_id': '3', 'source': str(source.with_name('conflict.mp4')),
                  'reason': 'destination-exists', 'missing': []}]
             report_path = base / 'reports' / 'organization-preview.json'
@@ -442,7 +442,7 @@ class OrganizationReportTests(unittest.TestCase):
             self.assertNotIn('ready.mp4', summary)
             report = report_path.with_suffix('.txt').read_text()
             self.assertIn('needs-info.mp4', report)
-            self.assertIn('title, female performer', report)
+            self.assertIn('title, performer matching organization settings', report)
             self.assertIn('ready.mp4', report)
             self.assertIn('Destination file already exists', report)
 
@@ -462,7 +462,7 @@ class OrganizationReportTests(unittest.TestCase):
             plan, skipped = o.build_plan([scene], root, incoming, details)
             self.assertEqual(plan, [])
             self.assertEqual(len(details), 2)
-            self.assertTrue(all(item['missing'] == ['title', 'female performer'] for item in details))
+            self.assertTrue(all(item['missing'] == ['title', 'performer matching organization settings'] for item in details))
 
 
 class CleanupEfficiencyTests(unittest.TestCase):

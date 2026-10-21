@@ -8,14 +8,14 @@ import time
 import encoding_queue as encoding
 import organizer_journal as journal
 
-ITEMS = [('15', 'Encoding settings'), ('16', 'Open reports in Finder / TextEdit'),
+ITEMS = [('15', 'Encoding settings'), ('16', 'Open saved reports'),
          ('17', 'Build encoding list from Stash'), ('18', 'Compare duplicate scene files'),
          ('19', 'Retry Whisparr Sync for one scene'), ('20', 'View move and encode history'),
          ('21', 'Undo a recorded move / primary change'), ('22', 'Review finished encodes'),
          ('23', 'Make reviewed encode primary in Stash')]
 DESCRIPTIONS = {
     '15': ('ENCODING / SETTINGS', 'Edit bitrate, resolution limits, source bitrate threshold and hardware/software encoder. New lists use these settings; saved lists retain their own settings.'),
-    '16': ('REPORTS / OPEN', 'Open the reports folder in Finder, or select a readable report to open in TextEdit.'),
+    '16': ('REPORTS / OPEN', 'Open the reports folder in Finder, or select a report to open with the default application.'),
     '17': ('STASH / ENCODING', 'Use Stash metadata to build candidates without a folder walk. Verify each selected source on disk before encoding. HDR is checked before encoding starts for that file.'),
     '18': ('DUPLICATES / REVIEW', 'Compare attached files by resolution, codec, duration and size. Read-only report; no automatic deletion.'),
     '19': ('WHISPARR / RETRY', 'Discover the enabled Whisparr Sync plugin, choose one pending scene, and run only that scene through the plugin. Shows job progress and verifies its new Stash paths.'),
@@ -71,7 +71,7 @@ def open_reports(o):
     value = input('Report number [0]: ').strip() or '0'
     if not value.isdigit() or not 0 <= int(value) <= len(paths):
         raise RuntimeError('Choose a report from the list.')
-    arguments = ['/usr/bin/open', str(o.REPORTS_DIR)] if value == '0' else ['/usr/bin/open', '-a', 'TextEdit', str(paths[int(value) - 1])]
+    arguments = ['/usr/bin/open', str(o.REPORTS_DIR)] if value == '0' else ['/usr/bin/open', str(paths[int(value) - 1])]
     subprocess.run(arguments, check=True, capture_output=True)
     print('Opened.')
 
@@ -403,9 +403,7 @@ DETAIL_FIELDS = 'id title code director details urls date production_date rating
 
 
 def exact_scenes(o, api, path):
-    raw = o.stash_path(path)
-    alias = '/incoming/' + str(Path(path).relative_to(o.SHARE_ROOT))
-    scope = {'path': {'value': raw, 'modifier': 'EQUALS'}, 'OR': {'path': {'value': alias, 'modifier': 'EQUALS'}}}
+    scope = o.path_scope(o.stash_paths(path), 'EQUALS')
     query = 'query($scope:SceneFilterType!){findScenes(filter:{per_page:-1},scene_filter:$scope){scenes{' + DETAIL_FIELDS + '}}}'
     scenes = api.gql(query, {'scope': scope})['findScenes']['scenes']
     return [scene for scene in scenes if any(o.canonical(file['path']) == Path(path) for file in scene.get('files') or [])]

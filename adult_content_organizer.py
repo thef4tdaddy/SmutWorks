@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SmutWorks: Stash-driven organization and incoming-folder cleanup."""
 import collections
+import configuration
 import getpass
 import organizer_journal
 import encoding_queue
@@ -19,19 +20,27 @@ import urllib.request
 SHARE_ROOT = Path('/Volumes/Media')
 MEDIA_ROOT = SHARE_ROOT / 'media/scenes'
 INCOMING_ROOT = SHARE_ROOT / 'incoming'
-APP_VERSION = '0.1.0-alpha.1'
+APP_VERSION = '0.1.0-alpha.2'
 # Reuse an existing installation's private state without moving or losing settings.
 LEGACY_STATE_DIR = Path.home() / 'Library/Application Support/Adult Content Organizer'
-STATE_DIR = (LEGACY_STATE_DIR if (LEGACY_STATE_DIR / 'settings.json').is_file() else
-             Path.home() / 'Library/Application Support/SmutWorks')
+STATE_DIR = Path(os.environ.get('SMUTWORKS_CONFIG_DIR') or (
+    str(LEGACY_STATE_DIR) if (LEGACY_STATE_DIR / 'settings.json').is_file() else
+    str(Path.home() / 'Library/Application Support/SmutWorks'))).expanduser()
 CONFIG_FILE = STATE_DIR / 'settings.json'
 PROBE_CACHE_FILE = STATE_DIR / 'video-probe-cache.json'
-REPORTS_DIR = Path(__file__).resolve().parent / 'reports'
+LEGACY_REPORTS_DIR = Path(__file__).resolve().parent / 'reports'
+REPORTS_DIR = Path(os.environ.get('SMUTWORKS_REPORTS_DIR') or (
+    str(LEGACY_REPORTS_DIR) if LEGACY_REPORTS_DIR.is_dir() else str(STATE_DIR / 'reports'))).expanduser()
 PLAN_FILE = REPORTS_DIR / 'organization-preview.json'
 CLEANUP_FILE = REPORTS_DIR / 'cleanup-preview.json'
 ENCODING_FILE = REPORTS_DIR / 'encoding-preview.json'
 ENCODING_CSV = REPORTS_DIR / 'encoding-list.csv'
 MAX_DEPTH = 6
+STASH_ROOT = '/media'
+STASH_ALIASES = ['/incoming']
+PERFORMER_GENDERS = ['FEMALE', 'TRANSGENDER_FEMALE']
+UNLINKED_SUBFOLDER = 'not on stash'
+DELEGATE_STASHDB = True
 SMALL_FILE_LIMIT = 10 * 1024 * 1024
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.heic'}
 VIDEO_EXTENSIONS = encoding_queue.EXTENSIONS | {'.mpg', '.mpeg', '.m2ts', '.mts', '.vob', '.flv', '.3gp', '.ogv'}
@@ -56,18 +65,42 @@ def log(message):
 
 
 def set_paths(settings):
-    global SHARE_ROOT, MEDIA_ROOT, INCOMING_ROOT
-    SHARE_ROOT = Path(settings['share_root']).expanduser()
-    for field in ('incoming_relative', 'media_relative'):
-        relative = Path(settings[field])
-        if relative.is_absolute() or '..' in relative.parts or str(relative) in ('', '.'):
-            raise RuntimeError('Folder paths inside the share must be nonempty relative paths without ..')
+    global SHARE_ROOT, MEDIA_ROOT, INCOMING_ROOT, STASH_ROOT, STASH_ALIASES
+    global PERFORMER_GENDERS, UNLINKED_SUBFOLDER, MAX_DEPTH, DELEGATE_STASHDB
+    global FLAG_TITLE, FLAG_PERFORMER, FLAG_GENERAL, MANAGED_FLAGS
+    settings = configuration.normalize(settings)
+    SHARE_ROOT = Path(settings['share_root'])
     MEDIA_ROOT = SHARE_ROOT / settings['media_relative']
     INCOMING_ROOT = SHARE_ROOT / settings['incoming_relative']
+    STASH_ROOT, STASH_ALIASES = settings['stash_root'], settings['stash_aliases']
+    PERFORMER_GENDERS = settings['performer_genders']
+    UNLINKED_SUBFOLDER = settings['unlinked_subfolder']
+    MAX_DEPTH = settings['performer_search_depth']
+    DELEGATE_STASHDB = settings['delegate_stashdb']
+    prefix = settings['tag_prefix'] + ' - '
+    FLAG_TITLE = prefix + 'Needs title'
+    FLAG_PERFORMER = prefix + ('Needs female performer' if settings['legacy_performer_tag'] else 'Needs eligible performer')
+    FLAG_GENERAL = prefix + 'Needs metadata'
+    MANAGED_FLAGS = {FLAG_TITLE, FLAG_PERFORMER, FLAG_GENERAL}
 
 
 def stash_path(path):
-    return str(Path('/media') / Path(path).relative_to(SHARE_ROOT))
+    return str(Path(STASH_ROOT) / Path(path).relative_to(SHARE_ROOT))
+
+
+def stash_paths(path):
+    relative = Path(path).relative_to(SHARE_ROOT)
+    return list(dict.fromkeys(str(Path(root) / relative) for root in [STASH_ROOT] + STASH_ALIASES))
+
+
+def path_scope(paths, modifier='INCLUDES'):
+    scope = None
+    for path in reversed(paths):
+        node = {'path': {'value': path, 'modifier': modifier}}
+        if scope is not None:
+            node['OR'] = scope
+        scope = node
+    return scope
 
 
 def normalized(text):
@@ -91,11 +124,12 @@ def performer_folder(root, name, matches):
 
 def canonical(path):
     path = Path(path)
-    # These two bind mounts point to the same NAS directory in this installation.
-    if path == Path('/incoming') or Path('/incoming') in path.parents:
-        return SHARE_ROOT / path.relative_to('/incoming')
-    if path == Path('/media') or Path('/media') in path.parents:
-        return SHARE_ROOT / path.relative_to('/media')
+    # Accept paths already expressed in the local filesystem first.
+    if beneath(path, SHARE_ROOT):
+        return path
+    for root in sorted([STASH_ROOT] + STASH_ALIASES, key=len, reverse=True):
+        if beneath(path, Path(root)):
+            return SHARE_ROOT / path.relative_to(root)
     return path
 
 
@@ -121,7 +155,7 @@ def has_stashdb(scene):
 
 def choose_performer(scene):
     performers = [p for p in scene.get('performers') or []
-                  if p.get('gender') in ('FEMALE', 'TRANSGENDER_FEMALE')
+                  if ('*' in PERFORMER_GENDERS or p.get('gender') in PERFORMER_GENDERS)
                   and (p.get('name') or '').strip()]
     return min(performers, key=lambda p: (normalized(p['name']), str(p['id']))) if performers else None
 
@@ -162,10 +196,7 @@ class API:
         return any(f['name'] == 'moveFiles' for f in (data.get('__type') or {}).get('fields', []))
 
     def scenes(self, technical=False):
-        incoming = stash_path(INCOMING_ROOT)
-        alias = '/incoming/' + str(INCOMING_ROOT.relative_to(SHARE_ROOT))
-        scope = {'path': {'value': incoming, 'modifier': 'INCLUDES'},
-                 'OR': {'path': {'value': alias, 'modifier': 'INCLUDES'}}}
+        scope = path_scope(stash_paths(INCOMING_ROOT))
         yield from self.filtered_scenes(scope, technical=technical)
 
     def filtered_scenes(self, scope, technical=False):
@@ -229,10 +260,10 @@ def existing_folders(root, names):
 def eligible(scene):
     if not (scene.get('title') or '').strip():
         return None, 'no-title'
-    if has_stashdb(scene):
+    if DELEGATE_STASHDB and has_stashdb(scene):
         return None, 'has-stashdb'
     performer = choose_performer(scene)
-    return (performer, None) if performer else (None, 'no-female-performer')
+    return (performer, None) if performer else (None, 'no-eligible-performer')
 
 
 def desired_flags(scene):
@@ -253,7 +284,7 @@ def metadata_flags_task(api, apply=False):
     scenes = list(api.scenes())
     for original in scenes:
         scene = api.scene(original['id']) if apply else original
-        if not scene or has_stashdb(scene):
+        if not scene or (DELEGATE_STASHDB and has_stashdb(scene)):
             continue
         if not any(beneath(canonical(f.get('path') or ''), INCOMING_ROOT)
                    for f in scene.get('files') or []):
@@ -299,7 +330,7 @@ def build_plan(scenes, root, incoming, details=None):
             if any(protected_name(part) for part in path.relative_to(incoming).parts):
                 record(scene, item, 'protected-incoming-path')
                 continue
-            if has_stashdb(scene):
+            if DELEGATE_STASHDB and has_stashdb(scene):
                 record(scene, item, 'has-stashdb')
                 continue
             if Path(raw).is_symlink() or path.is_symlink() or not path.is_file():
@@ -310,7 +341,7 @@ def build_plan(scenes, root, incoming, details=None):
                 if not (scene.get('title') or '').strip():
                     missing.append('title')
                 if choose_performer(scene) is None:
-                    missing.append('female performer')
+                    missing.append('performer matching organization settings')
                 record(scene, item, metadata_reason, missing)
                 continue
             candidates.append((scene, performer, item, path))
@@ -323,7 +354,7 @@ def build_plan(scenes, root, incoming, details=None):
         if folder is None:
             record(scene, item, 'unsafe-performer-folder' if len(matches) < 2 else 'ambiguous-performer-folder')
             continue
-        target = folder / 'not on stash' / path.name
+        target = folder / UNLINKED_SUBFOLDER / path.name
         if not beneath(target.parent.resolve(), root.resolve()):
             record(scene, item, 'unsafe-target')
             continue
@@ -457,7 +488,7 @@ def stashdb_incoming_review(scenes):
         if not (scene.get('title') or '').strip():
             issues.append('Add a scene title in Stash')
         if choose_performer(scene) is None:
-            issues.append('Review female performer assignment in Stash')
+            issues.append('Review performer assignment and organization gender settings in Stash')
         issues.append('File still in incoming/sync; review or run Whisparr Sync')
         review['review_notes'] = issues
         review['stashdb_ids'] = stashdb_ids
@@ -723,7 +754,7 @@ def revalidate(api, item):
     # Recheck the existing performer folder and naming before executing a saved plan.
     matches = existing_folders(MEDIA_ROOT, {normalized(performer['name'])}).get(normalized(performer['name']), [])
     performer_root = performer_folder(MEDIA_ROOT, performer['name'], matches)
-    expected = performer_root / 'not on stash' / source.name if performer_root is not None else None
+    expected = performer_root / UNLINKED_SUBFOLDER / source.name if performer_root is not None else None
     return expected is not None and str(expected) == item['target']
 
 
@@ -774,22 +805,36 @@ def prompt(label, default):
 
 
 def configure(old=None):
-    old = old or {}
-    print('\nStash connection and NAS folders')
-    print('Use the folder mounted in Finder, not the NAS /volume2 path.')
+    old = configuration.normalize(old) if old else {'settings_version': 1}
+    print('\nStash connection and local media paths')
+    print('Use paths accessible to this computer. A mounted share or a local disk both work.')
     url = prompt('Stash URL', old.get('stash_url', 'http://localhost:9999'))
     parts = urllib.parse.urlsplit(url)
     if parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
         raise RuntimeError('Use an http(s) URL without embedded credentials, query or fragment.')
-    key = getpass.getpass('Stash API key (hidden; Enter keeps the saved key): ')
-    settings = {'stash_url': url, 'api_key': key or old.get('api_key', ''),
-        'share_root': prompt('Mounted NAS share', old.get('share_root', '/Volumes/Media')),
-        'incoming_relative': prompt('Incoming folder inside share', old.get('incoming_relative', 'incoming')),
-        'media_relative': prompt('Organized root inside share', old.get('media_relative', 'media/scenes'))}
-    if old.get('encoding'):
-        settings['encoding'] = old['encoding']
-    set_paths(settings)
+    key = getpass.getpass('Stash API key (hidden; Enter keeps saved key; - clears it): ')
+    settings = dict(old, stash_url=url, api_key='' if key == '-' else key or old.get('api_key', ''))
+    settings.update({
+        'share_root': prompt('Local media root', old.get('share_root', '/Volumes/Media')),
+        'incoming_relative': prompt('Incoming folder relative to local root', old.get('incoming_relative', 'incoming')),
+        'media_relative': prompt('Organized folder relative to local root', old.get('media_relative', 'media/scenes')),
+        'stash_root': prompt('Same root as seen by Stash', old.get('stash_root', '/media'))})
+    print('Optional aliases are other Stash paths for the SAME local root. Enter - for none.')
+    aliases = prompt('Stash root aliases (comma separated)', ','.join(old.get('stash_aliases', [])) or '-')
+    settings['stash_aliases'] = [] if aliases == '-' else [value.strip() for value in aliases.split(',') if value.strip()]
+    print('Performer genders: * for any, or comma-separated Stash gender names (e.g. FEMALE,TRANSGENDER_FEMALE).')
+    settings['performer_genders'] = [value.strip().upper() for value in prompt('Eligible performer genders', ','.join(old.get('performer_genders', ['*']))).split(',')]
+    settings['unlinked_subfolder'] = prompt('Subfolder beneath chosen performer', old.get('unlinked_subfolder', 'unlinked'))
+    settings['tag_prefix'] = prompt('Managed metadata tag prefix', old.get('tag_prefix', 'SmutWorks'))
+    delegate = prompt('Leave StashDB-linked organization to Whisparr Sync? yes/no',
+                      'yes' if old.get('delegate_stashdb', True) else 'no').casefold()
+    if delegate not in ('yes', 'no'):
+        raise RuntimeError('Choose yes or no for StashDB delegation.')
+    settings['delegate_stashdb'] = delegate == 'yes'
+    settings = configuration.normalize(settings)
+    # Validate fully before changing global paths or saving.
     save_document(CONFIG_FILE, settings)
+    set_paths(settings)
     print('Settings saved privately. No media files changed.')
     print('Reports folder:', REPORTS_DIR)
     return settings
@@ -800,7 +845,9 @@ def connection_test(settings):
     data = api.gql('query{version{version}}')
     print('Stash version:', (data.get('version') or {}).get('version', 'connected'))
     print('Native file-move API:', 'available' if api.supports_move() else 'not available; moving is disabled')
-    print('NAS share:', 'mounted' if SHARE_ROOT.is_dir() else 'NOT FOUND — mount it in Finder')
+    print('Local media root:', 'accessible' if SHARE_ROOT.is_dir() else 'NOT FOUND — verify the path or mount the share')
+    print('Stash root:', STASH_ROOT, '| Aliases:', ', '.join(STASH_ALIASES) or 'none')
+    print('Performer genders:', ', '.join(PERFORMER_GENDERS), '| Subfolder:', UNLINKED_SUBFOLDER)
     print('Incoming folder:', 'found' if INCOMING_ROOT.is_dir() else 'NOT FOUND')
     print('Organized root:', 'found' if MEDIA_ROOT.is_dir() else 'NOT FOUND')
 
@@ -809,7 +856,7 @@ MENU = '''
 SmutWorks
 
   1  Connection and folder settings
-  2  Test Stash connection and NAS folders
+  2  Test Stash connection and media folders
   3  Preview file organization
   4  Move files from the saved preview
   5  Preview missing-metadata flags
@@ -840,13 +887,13 @@ MENU_DESCRIPTIONS = {
     '2': ('SETUP', 'Check Stash connectivity, native file-move support and mounted folders. This check does not change media.'),
     '3': ('ORGANIZE / PREVIEW', 'Find eligible incoming scenes using Stash metadata. Shows basic counts and saves all proposed destinations and missing metadata to reports/organization-preview.txt. Nothing moves yet.'),
     '4': ('ORGANIZE / APPLY', 'Move media from the saved organization preview using the Stash API. Rechecks metadata, source files and destination conflicts.'),
-    '5': ('METADATA / PREVIEW', 'Show scenes that need a title or female performer before organization. Preview only.'),
+    '5': ('METADATA / PREVIEW', 'Show scenes that need a title or eligible performer before organization. Preview only.'),
     '6': ('METADATA / APPLY', 'Add or clear organizer metadata flags in Stash. Existing user tags are preserved.'),
     '7': ('CLEANUP / PREVIEW', 'Check BOTH incoming and organized media. Report empty folders and image/small-file-only leftovers. Preview image destinations; nothing moves or gets removed.'),
     '13': ('CLEANUP / COLLECT', 'Move previewed images into leftover images under their respective root. Preserve relative subfolders. Leave small non-image files in place. Run Scan empty folders and leftovers first.'),
     '8': ('CLEANUP / APPLY', 'Remove only previewed folders that are still empty. Both library roots are preserved. Run a fresh cleanup scan after collecting images.'),
-    '9': ('REPORTS', 'Read saved organization, cleanup, image collection and encoding reports. Reports live in reports/ beside this app.'),
-    '10': ('HANDBRAKE / PREVIEW', 'Choose incoming or organized media and build a reviewed encoding list. Target: up to 1080p H.265 10-bit at 5000 kbps. No encoding starts.'),
+    '9': ('REPORTS', 'Read saved organization, cleanup, image collection and encoding reports. Reports are stored in the configured reports directory.'),
+    '10': ('HANDBRAKE / PREVIEW', 'Choose incoming or organized media and build a reviewed encoding list. Uses the saved encoding settings. No encoding starts.'),
     '12': ('HANDBRAKE / COMMAND', 'Print one copy-and-paste command for the saved encoding list. Run it in another Terminal window to see HandBrake progress.'),
     '11': ('HANDBRAKE / ENCODE', 'Encode the saved list on this Mac. Requires typing ENCODE before starting. Outputs stay beside their originals as - reencoded.mkv. Originals are kept.'),
     '0': ('EXIT', 'Close SmutWorks. Saved settings and reports remain available next time.')}
@@ -935,7 +982,7 @@ def choose_menu(settings, previous='1'):
                 write(2, 2, 'Stash library tools  /  Cleanup  /  HandBrake', curses.A_DIM)
                 configured = settings is not None
                 mounted = configured and SHARE_ROOT.is_dir()
-                status = 'SETUP NEEDED' if not configured else ('NAS MOUNTED' if mounted else 'NAS NOT FOUND')
+                status = 'SETUP NEEDED' if not configured else ('MEDIA AVAILABLE' if mounted else 'MEDIA UNAVAILABLE')
                 write(1, max(29, width - len(status) - 3), status, good if mounted else accent)
                 write(4, 2, 'Stash: ' + settings['stash_url'] if configured else 'Start with Connection and folder settings.', curses.A_DIM)
                 rows = max(1, height - 11)
@@ -1076,8 +1123,13 @@ def main():
             return 1
         settings = None
         if CONFIG_FILE.exists():
-            settings = json.loads(CONFIG_FILE.read_text())
-            set_paths(settings)
+            try:
+                settings = configuration.normalize(json.loads(CONFIG_FILE.read_text()))
+                set_paths(settings)
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+                print('Saved settings could not be loaded:', str(error))
+                print('Use Connection and folder settings to review the configuration:', CONFIG_FILE)
+                settings = None
         previous = '1'
         while True:
             try:

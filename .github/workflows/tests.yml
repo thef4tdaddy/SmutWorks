@@ -9,3 +9,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: python3 -m unittest discover -v
+      - run: python3 -m pip install .
+      - run: smutworks --version
+      - run: smutworks --help

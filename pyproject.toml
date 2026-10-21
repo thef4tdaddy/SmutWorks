@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smutworks"
+version = "0.1.0a2"
+description = "A terminal toolkit for organizing and encoding Stash media libraries"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console :: Curses",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+]
+
+[project.scripts]
+smutworks = "smutworks:main"
+
+[project.urls]
+Repository = "https://github.com/thef4tdaddy/SmutWorks"
+Issues = "https://github.com/thef4tdaddy/SmutWorks/issues"
+
+[tool.setuptools]
+py-modules = ["smutworks", "adult_content_organizer", "configuration", "encoding_queue", "organizer_features", "organizer_journal", "terminal_dashboard"]

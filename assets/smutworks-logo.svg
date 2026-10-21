@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="440" viewBox="0 0 1400 440" role="img" aria-labelledby="title desc">
+<title id="title">SmutWorks</title><desc id="desc">Adult media toolkit. Stacked media frames and a gear in magenta and purple on charcoal.</desc>
+<defs><linearGradient id="brand" x1="0" x2="1" y1="0" y2="0"><stop stop-color="#f526ad"/><stop offset="1" stop-color="#9747ff"/></linearGradient><linearGradient id="icon" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ff28ae"/><stop offset="1" stop-color="#9b45ff"/></linearGradient></defs>
+<rect width="1400" height="440" rx="24" fill="#111218"/>
+<g fill="none" stroke-width="15" stroke-linejoin="round"><rect x="132" y="105" width="151" height="157" rx="19" stroke="#7031a8"/><rect x="111" y="125" width="151" height="157" rx="19" stroke="#ab2ed1"/><rect x="90" y="145" width="151" height="157" rx="19" stroke="url(#icon)"/></g>
+<path d="M145 186L193 222L145 258Z" fill="url(#icon)"/>
+<g fill="#fa2aaf"><rect x="101" y="164" width="9" height="16" rx="3"/><rect x="101" y="191" width="9" height="16" rx="3"/><rect x="101" y="218" width="9" height="16" rx="3"/><rect x="101" y="245" width="9" height="16" rx="3"/></g>
+<g transform="translate(252 286)" fill="#ab48fa" stroke="#111218" stroke-width="7"><path d="M-13-48H13L17-35L28-29L42-32L54-10L44 0L44 13L54 23L42 45L28 42L17 48L13 61H-13L-17 48L-28 42L-42 45L-54 23L-44 13V0L-54-10L-42-32L-28-29L-17-35Z"/><circle cy="7" r="17" fill="#111218" stroke="none"/></g>
+<text x="354" y="253" fill="url(#brand)" font-family="Inter,Arial,Helvetica,sans-serif" font-size="135" font-weight="800" letter-spacing="-6">SmutWorks</text>
+<path d="M363 296H425M1185 296H1247" stroke="#ec2cb8" stroke-width="3" stroke-linecap="round"/>
+<text x="455" y="305" fill="#b9b2d4" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="500" letter-spacing="7">ADULT MEDIA TOOLKIT</text>
+</svg>

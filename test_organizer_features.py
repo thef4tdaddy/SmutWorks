@@ -196,7 +196,7 @@ class FeatureTests(unittest.TestCase):
         report.write_text('Report')
         with patch('builtins.input', return_value='1'), patch.object(f.subprocess, 'run') as run:
             f.open_reports(o)
-        self.assertEqual(run.call_args.args[0], ['/usr/bin/open', '-a', 'TextEdit', str(report)])
+        self.assertEqual(run.call_args.args[0], ['/usr/bin/open', str(report)])
 
     def test_stash_source_hdr_is_rechecked_before_encoding(self):
         event = self.encode_event()

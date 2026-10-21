@@ -1,12 +1,14 @@
+<p align="center"><img src="assets/smutworks-logo.svg" alt="SmutWorks — Adult Media Toolkit" width="100%"></p>
+
 # SmutWorks
 
 A terminal-based adult media toolkit for **Stash**, **Whisparr Sync**, and **HandBrakeCLI**.
 
-**0.1.0-alpha.1 · macOS · Python 3.8+ · Python standard library only**
+**0.1.0-alpha.2 · macOS · Python 3.8+ · Python standard library only**
 
 ## Features
 
-- Preview and organize incoming scenes using Stash titles and assigned female performers.
+- Preview and organize incoming scenes using Stash titles and performers matching configurable gender preferences.
 - Flag missing metadata while preserving your other Stash tags.
 - Find empty directories and leftover images/small files in incoming and organized media folders.
 - Compare multiple files attached to a Stash scene.
@@ -27,11 +29,19 @@ cd SmutWorks
 python3 smutworks.py
 ```
 
+For a standard command-line installation from the checkout:
+
+```sh
+python3 -m pip install .
+smutworks --help
+smutworks
+```
+
 Alternatively, double-click **Start SmutWorks.command** (make it executable with `chmod +x 'Start SmutWorks.command'` if necessary). The older `adult_content_organizer.py` entry point remains supported.
 
 Use **Connection and folder settings** to configure your own Stash URL, API key, mounted share, and relative incoming/organized paths. Mount your NAS share before running scans or encodes. The default paths are examples, not a requirement for your folder layout.
 
-The current container path mapping expects the same share to be mounted in Stash at `/incoming` and `/media`. Review your mapping before applying moves. See [the feature guide](docs/legacy-guide.txt) for detailed menu behavior.
+Configure the local media root and the equivalent root as seen by Stash; no particular NAS, hostname, or Docker mount name is required. Optional aliases support multiple mounts of the same root. See [configuration](docs/configuration.md) for examples and migration behavior. See [the feature guide](docs/legacy-guide.txt) for detailed menu behavior.
 
 ## Encoding
 
@@ -47,9 +57,9 @@ Encoding currently reads and writes directly on the configured share. Keep the M
 
 ## Settings, reports, and upgrades
 
-New installations save private settings under `~/Library/Application Support/SmutWorks/`. Existing installations with settings in `~/Library/Application Support/Adult Content Organizer/` continue using that location. API keys, caches, reports, and history are not committed to GitHub.
+New installations save settings/cache under `~/Library/Application Support/SmutWorks/` and reports/history under its `reports/` subfolder. Existing installations keep their earlier settings and app-adjacent reports when present. Directory overrides are available through `--config-dir`, `--reports-dir`, and their environment variables. See [configuration](docs/configuration.md).
 
-Reports and action history live in `reports/` beside the application. When upgrading an older installation, copy its `reports/` directory if you want to retain its queues/history. Existing managed Stash tags retain the `ACO -` prefix for compatibility.
+New organization policies use any named performer, an `unlinked` subfolder, and `SmutWorks -` managed metadata tags. Gender eligibility, subfolder names, tag prefix, and StashDB delegation can all be changed in setup. The alphabetically first eligible performer is used. Existing installations retain the earlier policy until changed explicitly.
 
 Cleanup uses previews and separate apply actions. Images are collected into `leftover images/` under their respective root; only still-empty directories are removed. Cleanup does not automatically delete video files or partial encodes. Root-level loose-file cleanup remains a follow-up item.
 

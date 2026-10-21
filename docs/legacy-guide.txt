@@ -1,3 +1,7 @@
+LEGACY FEATURE REFERENCE
+For current setup, path mapping, organization policy, and report locations, see docs/configuration.md.
+This reference describes the original defaults; settings can override them.
+
 SMUTWORKS — LEGACY FEATURE GUIDE — MAC TERMINAL APP
 
 QUICK START / UPDATE
