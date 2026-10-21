@@ -2,6 +2,18 @@
 
 Open **Duplicates → Find duplicate groups**. Every scan is read-only and saves `duplicate-review.txt` and `duplicate-review.json` in the reports directory. Reports contain private paths and metadata; sanitize them before sharing.
 
+## Bulk cleanup
+
+For a large collection, scan once, then open **Duplicates → Bulk duplicate cleanup**. It writes `duplicate-bulk-plan.txt` with KEEP/QUARANTINE paths and reasons for groups that need review. The terminal shows group/file totals, the keep rule, and estimated space recoverable after later deletion. Enter cancels; typing `QUARANTINE <file count>` applies the displayed plan.
+
+The keep rule comes from **Duplicate review settings** and uses the shared Preferred quality profile. Bulk cleanup handles groups already attached to one Stash scene. It selects the recommended available file as primary and moves the extras into quarantine. It refreshes its snapshot after each verified change, so you do not need to rescan between files. Multiple-scene merges, unavailable/changed files, shared assignments, unknown/differing durations, and interactive scenes need review. Fresh media inspection may skip more groups than the initial metadata-only plan.
+
+Unchanged groups that fail preflight are skipped. An unexpected change after an operation starts stops the batch for inspection. Terminal completion summaries show completed/skipped/unfinished groups, keeper changes, file counts, and GiB handled. Per-file history and `duplicate-bulk-results.txt`/`.json` record progress; interrupted actions may need inspection before retrying. The whole batch holds the encoding/file-action lock.
+
+**Bulk quarantine restore / delete** can later restore or delete all recorded, confirmed quarantined files with one typed confirmation. It saves the selected paths to `duplicate-quarantine-batch.txt` first and rechecks each file and keeper. These are separate actions: quarantine retains disk usage and Stash file attachments, so Stash may still count a scene as having multiple files until the extras are deleted. Neither bulk action merges scene records.
+
+Unavailable entries are never recommended as keepers or counted as recoverable space. They remain in the report for path/mount review. Scan counts and an excluded-groups list explain candidates omitted because fewer than two distinct files remain after protected-folder exclusions; counts can also differ from a later Stash view if the collection changed between scans.
+
 ## Detection methods
 
 - **Multiple files on one scene:** Stash already associates several files with one scene.

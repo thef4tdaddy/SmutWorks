@@ -5,6 +5,7 @@ import json
 import math
 import os
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
@@ -23,7 +24,9 @@ SCENE_FIELDS = (
 )
 ITEMS = [
     ("24", "Find duplicate groups"),
+    ("29", "Bulk duplicate cleanup"),
     ("25", "Review duplicates and choose keepers"),
+    ("30", "Bulk quarantine restore / delete"),
     ("26", "Review quarantine / restore"),
     ("27", "Delete one quarantined file"),
     ("28", "Duplicate review settings"),
@@ -35,12 +38,21 @@ DESCRIPTIONS = {
     )
     for key, _ in ITEMS
 }
+DESCRIPTIONS["29"] = (
+    "DUPLICATES / BULK CLEANUP",
+    "Preview recommended keepers and extras for the saved scan, then quarantine eligible copies with one confirmation. Unavailable, changed, shared, and ambiguous groups need review. Nothing is deleted.",
+)
+DESCRIPTIONS["30"] = (
+    "DUPLICATES / BULK QUARANTINE",
+    "Review a saved list and restore or delete all confirmed quarantined files with one confirmation. Each keeper and file is checked again before changes.",
+)
 MODES = {
     "quality": "Best quality (heuristic)",
     "preferred": "Closest to preferred quality",
     "smallest": "Smallest meeting preferred quality",
     "manual": "Manual selection",
 }
+_ACTION_LOCK = threading.local()
 
 
 def serialized_action(action):
@@ -51,6 +63,8 @@ def serialized_action(action):
     def protected(o, *args, **kwargs):
         import fcntl
 
+        if getattr(_ACTION_LOCK, "held", False):
+            return action(o, *args, **kwargs)
         lock_path = o.ENCODING_FILE.with_suffix(".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with lock_path.open("a") as lock:
@@ -60,7 +74,11 @@ def serialized_action(action):
                 raise RuntimeError(
                     "The encoding queue or another file action is running. Finish it before duplicate changes."
                 ) from None
-            return action(o, *args, **kwargs)
+            _ACTION_LOCK.held = True
+            try:
+                return action(o, *args, **kwargs)
+            finally:
+                _ACTION_LOCK.held = False
 
     return protected
 
@@ -294,6 +312,8 @@ def collect(o, api, method, settings):
     """Native duplicate filters supply candidates; exact keys form explicit groups."""
     opt = options(settings)
     buckets, all_scenes = [], {}
+    attached_ids = set()
+    excluded_groups = []
 
     def add(rows, basis):
         rows = [v for v in rows if v]
@@ -306,6 +326,7 @@ def collect(o, api, method, settings):
         for row in scenes(
             api, {"file_count": {"value": 1, "modifier": "GREATER_THAN"}}
         ):
+            attached_ids.add(str(row["id"]))
             add([row], "attached files")
     if method in ("phash", "all"):
         groups = api.gql(
@@ -407,10 +428,32 @@ def collect(o, api, method, settings):
                     file["signature"] = None
                 files[str(file["id"])] = file
         if len(files) < 2:
+            excluded_groups.append(
+                {
+                    "scene_ids": sorted(ids),
+                    "titles": [row.get("title") or "(untitled)" for row in rows],
+                    "reason": "Fewer than two distinct files remain after protected-folder exclusions",
+                    "attached_file_count": sum(
+                        len(row.get("files") or []) for row in rows
+                    ),
+                    "review_file_count": len(files),
+                }
+            )
             continue
-        recommendation, why = recommend(
-            list(files.values()), opt["mode"], profile, opt["duration_diff"]
-        )
+        available = [file for file in files.values() if file.get("signature")]
+        if available:
+            recommendation, why = recommend(
+                available, opt["mode"], profile, opt["duration_diff"]
+            )
+            if len(available) != len(files):
+                why += (
+                    " Unavailable entries need path review; file actions are blocked."
+                )
+        else:
+            recommendation, why = (
+                None,
+                "No available files; check the mounted share and Stash paths.",
+            )
         group_id = hashlib.sha256(",".join(sorted(files)).encode()).hexdigest()[:12]
         merge_blocker = None
         if len(rows) > 1:
@@ -436,6 +479,15 @@ def collect(o, api, method, settings):
         "options": opt,
         "groups": result,
         "roots": [str(o.INCOMING_ROOT), str(o.MEDIA_ROOT)],
+        "scan_summary": {
+            "attached_scene_candidates": len(attached_ids),
+            "review_groups": len(result),
+            "excluded_groups": len(excluded_groups),
+            "groups_with_unavailable_files": sum(
+                any(not f.get("signature") for f in g["files"]) for g in result
+            ),
+        },
+        "excluded_groups": excluded_groups,
     }
 
 
@@ -449,10 +501,26 @@ def report(o, document):
         "Profile: " + encoding.summary(document["profile"]),
         "",
     ]
+    summary = document.get("scan_summary")
+    if summary:
+        lines += [
+            "SCAN COUNTS",
+            "Attached-file scene candidates: {} | Review groups: {} | Excluded groups: {} | Groups with unavailable files: {}".format(
+                summary["attached_scene_candidates"],
+                summary["review_groups"],
+                summary["excluded_groups"],
+                summary["groups_with_unavailable_files"],
+            ),
+            "",
+        ]
     for number, group in enumerate(document["groups"], 1):
         choice = group.get("recommendation")
         potential = (
-            sum(int(f["size"]) for f in group["files"] if str(f["id"]) != choice)
+            sum(
+                int(f["size"])
+                for f in group["files"]
+                if str(f["id"]) != choice and f.get("signature")
+            )
             if choice
             else 0
         )
@@ -489,9 +557,56 @@ def report(o, document):
         if group.get("merge_blocker"):
             lines.append("METADATA MERGE BLOCKED: " + group["merge_blocker"])
         lines += [""]
+    if document.get("excluded_groups"):
+        lines += ["EXCLUDED GROUPS"]
+        for entry in document["excluded_groups"]:
+            lines.append(
+                "Scenes {} | {} | {} | {} attached files, {} included".format(
+                    ", ".join(entry["scene_ids"]),
+                    "; ".join(entry["titles"]),
+                    entry["reason"],
+                    entry["attached_file_count"],
+                    entry["review_file_count"],
+                )
+            )
     o.save_document(o.REPORTS_DIR / "duplicate-review.json", document)
     path = features.text_report(o, "duplicate-review.txt", "\n".join(lines) + "\n")
     print("{} duplicate groups. See report: {}".format(len(document["groups"]), path))
+    total_files = sum(len(group["files"]) for group in document["groups"])
+    unavailable = sum(
+        not f.get("signature") for group in document["groups"] for f in group["files"]
+    )
+    recommended = sum(bool(group.get("recommendation")) for group in document["groups"])
+    possible_bytes = sum(
+        int(f["size"])
+        for group in document["groups"]
+        if group.get("recommendation")
+        for f in group["files"]
+        if f.get("signature") and str(f["id"]) != group["recommendation"]
+    )
+    print(
+        "Files in review: {} | Available: {} | Unavailable: {}".format(
+            total_files, total_files - unavailable, unavailable
+        )
+    )
+    print(
+        "Groups with a suggested keeper: {} | Manual keeper review: {}".format(
+            recommended, len(document["groups"]) - recommended
+        )
+    )
+    print(
+        "Potential reduction from available extras: {:.2f} GiB after review/deletion. Nothing changed.".format(
+            possible_bytes / 1024**3
+        )
+    )
+    if summary:
+        print(
+            "{} attached-file scene candidates; {} excluded groups; {} groups contain unavailable files. See scan counts/exclusions in the report.".format(
+                summary["attached_scene_candidates"],
+                summary["excluded_groups"],
+                summary["groups_with_unavailable_files"],
+            )
+        )
 
 
 def fresh_group(o, api, document, group):
@@ -717,8 +832,13 @@ def apply_primary(o, api, document, group, file_id, merge=False):
     if len(rows) > 1 and not merge:
         raise RuntimeError("Merge these scenes first, or choose a single-scene group.")
     verified = verified_files(o, group, document["options"]["duration_diff"])
-    if group.get("mode") in ("preferred", "smallest") and str(file_id) == group.get(
-        "recommendation"
+    if (
+        group.get("mode") in ("preferred", "smallest")
+        and str(file_id) == group.get("recommendation")
+        and fits_profile(
+            info(next(f for f in group["files"] if str(f["id"]) == str(file_id))),
+            document["profile"],
+        )
     ):
         chosen = verified[
             next(
@@ -855,6 +975,10 @@ def quarantine(o, api, document, group, file_id):
     )
     if file is None or keeper is None:
         raise RuntimeError("File/keeper is not part of this review.")
+    if Path(file["local_path"]) == Path(keeper["local_path"]):
+        raise RuntimeError(
+            "Extra and keeper point at the same file path. Resolve duplicate database records manually."
+        )
     verified_files(o, group, document["options"]["duration_diff"])
     row = fresh_group(o, api, document, group)[0]
     current_file = next(v for v in row["files"] if str(v["id"]) == str(file_id))
@@ -900,6 +1024,7 @@ def quarantine(o, api, document, group, file_id):
     print(
         "File quarantined through Stash; still attached and recoverable. No disk space freed yet. Rescan before another action."
     )
+    return event
 
 
 @serialized_action
@@ -1113,6 +1238,11 @@ def choose(values, label):
 
 def handle(choice, o, settings):
     api = o.API(settings)
+    if choice in {"29", "30"}:
+        import duplicate_batch
+
+        duplicate_batch.handle(choice, o, api, settings)
+        return settings
     if choice == "28":
         old = options(settings)
         names = list(MODES)

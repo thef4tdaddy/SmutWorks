@@ -4,7 +4,9 @@
 
 A terminal-based adult media toolkit for **Stash**, **Whisparr Sync**, and **HandBrakeCLI**.
 
-**0.1.0-alpha.3 · macOS · Python 3.8+ · Python standard library only**
+**0.1.0-alpha.4 · macOS · Python 3.8+ · Python standard library only**
+
+Large duplicate collections can use **Duplicates → Bulk duplicate cleanup** to preview keepers and quarantine extras together. Bulk restore/deletion is a separate confirmed action; groups needing manual review are reported.
 
 ## Features
 

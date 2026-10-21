@@ -11,7 +11,7 @@ def main(argv=None):
         description="SmutWorks — Stash media organization and encoding toolkit."
     )
     parser.add_argument(
-        "--version", action="version", version="SmutWorks 0.1.0-alpha.3"
+        "--version", action="version", version="SmutWorks 0.1.0-alpha.4"
     )
     parser.add_argument(
         "--config-dir",

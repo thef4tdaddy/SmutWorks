@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.4
+
+- Show scan and completion totals directly in the terminal, including counts, data sizes, skipped groups, keeper changes, and remaining work.
+- Add bulk duplicate cleanup plans and one-confirmation quarantine, plus separate bulk restore/deletion. Reuse live ownership, metadata, and media guards; stop unexpected changes and journal progress.
+- Exclude unavailable copies from keeper recommendations and savings estimates. Report scan counts and excluded groups, and allow the closest existing keeper even when it needs a later encode.
+
 ## 0.1.0-alpha.3
 
 - Adapt duplicate scans and encode-output lookup to older Stash schemas without production dates or direct file ownership fields. Verify ownership through native scene-path queries before file changes.

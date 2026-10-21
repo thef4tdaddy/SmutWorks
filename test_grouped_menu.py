@@ -22,7 +22,7 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(nav.index, 2)
         nav.key("ENTER")
         self.assertEqual(nav.index, 1)
-        self.assertEqual(nav.key("ENTER"), "25")
+        self.assertEqual(nav.key("ENTER"), "29")
 
     def test_numbers_are_local_and_zero_returns(self):
         nav = m.Navigation()
