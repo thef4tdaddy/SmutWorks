@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+<title id="title">SmutWorks icon</title>
+<defs><linearGradient id="brand" x2="1" y2="1"><stop stop-color="#ff28ae"/><stop offset="1" stop-color="#9747ff"/></linearGradient></defs>
+<rect width="512" height="512" rx="110" fill="#111218"/>
+<g fill="none" stroke-width="25"><rect x="176" y="93" width="218" height="241" rx="30" stroke="#7031a8"/><rect x="141" y="126" width="218" height="241" rx="30" stroke="#a42bce"/><rect x="106" y="159" width="218" height="241" rx="30" stroke="url(#brand)"/></g>
+<path d="M181 224L254 279L181 334Z" fill="url(#brand)"/>
+<g fill="#fb2ab0"><rect x="121" y="189" width="14" height="24" rx="4"/><rect x="121" y="231" width="14" height="24" rx="4"/><rect x="121" y="273" width="14" height="24" rx="4"/><rect x="121" y="315" width="14" height="24" rx="4"/></g>
+<g transform="translate(357 365) scale(1.25)" fill="#a84bf5" stroke="#111218" stroke-width="9"><path d="M-13-48H13L17-35L28-29L42-32L54-10L44 0L44 13L54 23L42 45L28 42L17 48L13 61H-13L-17 48L-28 42L-42 45L-54 23L-44 13V0L-54-10L-42-32L-28-29L-17-35Z"/><circle cy="7" r="17" fill="#111218" stroke="none"/></g>
+</svg>

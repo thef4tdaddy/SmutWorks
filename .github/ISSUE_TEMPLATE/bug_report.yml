@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a problem with SmutWorks.
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: 'Remove API keys, passwords, hostnames, usernames, and private media paths before posting. Do not upload full settings or library reports.'
+  - type: input
+    id: version
+    attributes:
+      label: SmutWorks version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: macOS, Python, Stash, and relevant encoder/tool versions.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Which menu action did you use, and what happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized log excerpt
+      description: Include only the relevant lines. Replace personal paths and credentials.
+      render: text
