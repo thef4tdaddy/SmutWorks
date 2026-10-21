@@ -26,3 +26,25 @@ Issues = "https://github.com/thef4tdaddy/SmutWorks/issues"
 
 [tool.setuptools]
 py-modules = ["smutworks", "adult_content_organizer", "configuration", "duplicate_review", "grouped_menu", "encoding_queue", "organizer_features", "organizer_journal", "terminal_dashboard"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+extend-exclude = '/(build|dist|node_modules)/'
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+extend-exclude = ["build", "dist", "node_modules"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.8"
+files = ["smutworks.py", "adult_content_organizer.py", "configuration.py", "duplicate_review.py", "grouped_menu.py", "encoding_queue.py", "organizer_features.py", "organizer_journal.py", "terminal_dashboard.py"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+show_error_codes = true

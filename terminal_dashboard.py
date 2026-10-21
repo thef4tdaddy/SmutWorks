@@ -1,4 +1,5 @@
 """Run terminal actions in a live output pane using only the Python standard library."""
+
 import builtins
 import collections
 import contextlib
@@ -12,18 +13,20 @@ import sys
 import termios
 import textwrap
 import threading
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 
 class TaskConsole(io.TextIOBase):
     aco_capture_subprocess = True
+
     def __init__(self):
-        self.events = queue.Queue()
-        self.answers = queue.Queue()
+        self.events: "queue.Queue[Tuple[str, Any]]" = queue.Queue()
+        self.answers: "queue.Queue[Optional[str]]" = queue.Queue()
         self.cancelled = threading.Event()
-        self.pending = ''
+        self.pending = ""
 
     def set_encoding_status(self, **values):
-        self.events.put(('encoding_status', values))
+        self.events.put(("encoding_status", values))
 
     def writable(self):
         return True
@@ -35,30 +38,32 @@ class TaskConsole(io.TextIOBase):
         if self.cancelled.is_set():
             raise KeyboardInterrupt
         # HandBrake progress uses carriage returns; treat these as fresh log lines.
-        self.pending += str(text).replace('\r', '\n')
-        while '\n' in self.pending:
-            line, self.pending = self.pending.split('\n', 1)
-            if re.search(r'Encoding: task .*?\d+(?:\.\d+)?\s*%', line):
-                self.set_encoding_status(progress=line[line.index('Encoding:'):], stage='Encoding')
-            self.events.put(('line', line))
+        self.pending += str(text).replace("\r", "\n")
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            if re.search(r"Encoding: task .*?\d+(?:\.\d+)?\s*%", line):
+                self.set_encoding_status(
+                    progress=line[line.index("Encoding:") :], stage="Encoding"
+                )
+            self.events.put(("line", line))
         return len(text)
 
     def flush(self):
         if self.pending:
-            self.events.put(('line', self.pending))
-            self.pending = ''
+            self.events.put(("line", self.pending))
+            self.pending = ""
 
-    def ask(self, prompt='', hidden=False):
+    def ask(self, prompt="", hidden=False):
         self.flush()
         if self.cancelled.is_set():
             raise KeyboardInterrupt
-        self.events.put(('prompt', (prompt, hidden)))
+        self.events.put(("prompt", (prompt, hidden)))
         answer = self.answers.get()
         if answer is None:
             raise EOFError
         # Secret answers are never sent to the output log.
         if not hidden:
-            self.events.put(('line', prompt + answer))
+            self.events.put(("line", prompt + answer))
         return answer
 
 
@@ -66,44 +71,63 @@ def worker(console, task, outcome):
     old_input, old_getpass = builtins.input, getpass.getpass
     try:
         builtins.input = console.ask
-        getpass.getpass = lambda prompt='Password: ', stream=None: console.ask(prompt, hidden=True)
+        getpass.getpass = lambda prompt="Password: ", stream=None: console.ask(
+            prompt, hidden=True
+        )
         with contextlib.redirect_stdout(console), contextlib.redirect_stderr(console):
-            outcome['result'] = task()
+            outcome["result"] = task()
     except (KeyboardInterrupt, EOFError):
-        outcome['cancelled'] = True
-        console.set_encoding_status(stage='Stopped')
-        console.events.put(('line', 'Task stopped. If a file move was in progress, check its location before retrying.'))
+        outcome["cancelled"] = True
+        console.set_encoding_status(stage="Stopped")
+        console.events.put(
+            (
+                "line",
+                "Task stopped. If a file move was in progress, check its location before retrying.",
+            )
+        )
     except Exception as error:
-        outcome['error'] = True
-        console.set_encoding_status(stage='Stopped: check log')
-        message = str(error) if isinstance(error, RuntimeError) else type(error).__name__
-        console.events.put(('line', 'Action stopped: ' + message))
+        outcome["error"] = True
+        console.set_encoding_status(stage="Stopped: check log")
+        message = (
+            str(error) if isinstance(error, RuntimeError) else type(error).__name__
+        )
+        console.events.put(("line", "Action stopped: " + message))
     finally:
         builtins.input, getpass.getpass = old_input, old_getpass
         console.flush()
-        console.events.put(('done', None))
+        console.events.put(("done", None))
 
 
 def encoding_header(status, width):
     """Pinned lines are rendered separately from scrollback, including on errors."""
-    filename = ' '.join(str(status.get('filename', '')).split())
-    lines = textwrap.wrap('File {}/{}: {}'.format(status.get('position', '?'),
-                          status.get('total', '?'), filename), max(8, width))
+    filename = " ".join(str(status.get("filename", "")).split())
+    lines = textwrap.wrap(
+        "File {}/{}: {}".format(
+            status.get("position", "?"), status.get("total", "?"), filename
+        ),
+        max(8, width),
+    )
     # Keep a very long filename from consuming the whole pane.
     lines = lines[:2]
-    lines.append('Stage: {} | Completed: {}'.format(status.get('stage', ''), status.get('completed', 0)))
-    if status.get('progress'):
-        progress = re.sub(r'^Encoding: task \d+ of \d+,\s*', '', status['progress'])
+    lines.append(
+        "Stage: {} | Completed: {}".format(
+            status.get("stage", ""), status.get("completed", 0)
+        )
+    )
+    if status.get("progress"):
+        progress = re.sub(r"^Encoding: task \d+ of \d+,\s*", "", status["progress"])
         lines.extend(textwrap.wrap(progress, max(8, width))[:2])
     return lines
 
 
-def run(task, items, selected, status=''):
+def run(task, items, selected, status=""):
     """Execute a callback with stdout, prompts and hidden input confined to a pane."""
     console = TaskConsole()
-    outcome = {}
+    outcome: Dict[str, Any] = {}
     original_terminal = termios.tcgetattr(sys.stdin.fileno())
-    thread = threading.Thread(target=worker, args=(console, task, outcome), name='organizer-task')
+    thread = threading.Thread(
+        target=worker, args=(console, task, outcome), name="organizer-task"
+    )
 
     def screen(window):
         window.keypad(True)
@@ -127,11 +151,12 @@ def run(task, items, selected, status=''):
             curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLUE)
             accent = curses.color_pair(1) | curses.A_BOLD
             highlight = curses.color_pair(2) | curses.A_BOLD
-        lines = collections.deque(maxlen=4000)
-        done, question, answer, scroll = False, None, '', 0
+        lines: Deque[str] = collections.deque(maxlen=4000)
+        done, question, answer, scroll = False, None, "", 0
         encoding = {}
         revision = 0
-        wrap_key, wrapped = None, []
+        wrap_key = None
+        wrapped: List[str] = []
         thread.start()
         while True:
             while True:
@@ -139,17 +164,18 @@ def run(task, items, selected, status=''):
                     event, value = console.events.get_nowait()
                 except queue.Empty:
                     break
-                if event == 'line':
+                if event == "line":
                     lines.append(value)
                     revision += 1
-                elif event == 'encoding_status':
+                elif event == "encoding_status":
                     encoding.update(value)
-                elif event == 'prompt':
-                    question, answer = value, ''
-                elif event == 'done':
+                elif event == "prompt":
+                    question, answer = value, ""
+                elif event == "done":
                     done, question = True, None
             height, width = window.getmaxyx()
             window.erase()
+
             def write(y, x, text, style=0, limit=None):
                 if not 0 <= y < height - 1:
                     return
@@ -161,41 +187,69 @@ def run(task, items, selected, status=''):
                         window.addnstr(y, x, text, count, style)
                     except curses.error:
                         pass
-            write(1, 2, 'SMUTWORKS', accent)
-            state = 'STOPPING...' if console.cancelled.is_set() and not done else (('STOPPED' if outcome.get('error') or outcome.get('cancelled') else 'FINISHED') if done else 'WORKING...')
+
+            write(1, 2, "SMUTWORKS", accent)
+            state = (
+                "STOPPING..."
+                if console.cancelled.is_set() and not done
+                else (
+                    (
+                        "STOPPED"
+                        if outcome.get("error") or outcome.get("cancelled")
+                        else "FINISHED"
+                    )
+                    if done
+                    else "WORKING..."
+                )
+            )
             write(2, 2, status, curses.A_DIM)
             split = width >= 80 and height >= 15
             x = min(47, width // 2) if split else 2
             body_top = 6
             body_rows = max(1, height - 11)
             if split:
-                write(4, 2, 'ACTIONS', accent)
-                selected_index = next((i for i, item in enumerate(items) if item[0] == selected), 0)
+                write(4, 2, "ACTIONS", accent)
+                selected_index = next(
+                    (i for i, item in enumerate(items) if item[0] == selected), 0
+                )
                 start = max(0, selected_index - body_rows + 1)
-                for offset, (number, label) in enumerate(items[start:start + body_rows]):
-                    write(body_top + offset, 2, '{} {:>2} {}'.format('>' if number == selected else ' ', start + offset + 1, label).ljust(x - 5),
-                          highlight if number == selected else curses.A_DIM, x - 5)
+                for offset, (number, label) in enumerate(
+                    items[start : start + body_rows]
+                ):
+                    write(
+                        body_top + offset,
+                        2,
+                        "{} {:>2} {}".format(
+                            ">" if number == selected else " ",
+                            start + offset + 1,
+                            label,
+                        ).ljust(x - 5),
+                        highlight if number == selected else curses.A_DIM,
+                        x - 5,
+                    )
                 for y in range(4, height - 4):
                     try:
                         window.addch(y, x - 2, curses.ACS_VLINE)
                     except curses.error:
                         pass
-            title = dict(items).get(selected, 'Task')
+            title = dict(items).get(selected, "Task")
             write(4, x, title, accent)
             write(5, x, state, curses.A_DIM)
             available = max(8, width - x - 3)
             if wrap_key != (revision, available):
                 wrapped = []
                 for line in lines:
-                    line = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', line).expandtabs(4)
-                    wrapped.extend(textwrap.wrap(line, available, replace_whitespace=False) or [''])
+                    line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line).expandtabs(4)
+                    wrapped.extend(
+                        textwrap.wrap(line, available, replace_whitespace=False) or [""]
+                    )
                 wrap_key = (revision, available)
             log_top = body_top
             log_rows = body_rows
-            if encoding.get('filename'):
+            if encoding.get("filename"):
                 pinned = encoding_header(encoding, available)
                 # Reserve log space even on smaller terminals.
-                pinned = pinned[:max(1, body_rows - 2)]
+                pinned = pinned[: max(1, body_rows - 2)]
                 for offset, line in enumerate(pinned):
                     write(body_top + offset, x, line, accent)
                 log_top += len(pinned) + 1
@@ -207,42 +261,63 @@ def run(task, items, selected, status=''):
             if question:
                 prompt, hidden = question
                 write(height - 4, x, prompt, accent)
-                visible = '*' * len(answer) if hidden else answer
-                write(height - 3, x, '> ' + visible[-max(1, available - 2):], highlight)
-                write(height - 2, 2, 'ENTER Submit   ESC Cancel prompt', curses.A_DIM)
+                visible = "*" * len(answer) if hidden else answer
+                write(
+                    height - 3, x, "> " + visible[-max(1, available - 2) :], highlight
+                )
+                write(height - 2, 2, "ENTER Submit   ESC Cancel prompt", curses.A_DIM)
             else:
-                write(height - 3, 2, 'ENTER Menu   PgUp/PgDn Scroll   C Copy output' if done else 'Live output   PgUp/PgDn Scroll   Ctrl-C Stop after current operation', accent)
+                write(
+                    height - 3,
+                    2,
+                    (
+                        "ENTER Menu   PgUp/PgDn Scroll   C Copy output"
+                        if done
+                        else "Live output   PgUp/PgDn Scroll   Ctrl-C Stop after current operation"
+                    ),
+                    accent,
+                )
                 if not done:
-                    write(height - 2, 2, 'The menu is paused while this task runs.', curses.A_DIM)
+                    write(
+                        height - 2,
+                        2,
+                        "The menu is paused while this task runs.",
+                        curses.A_DIM,
+                    )
             window.refresh()
             try:
                 key = window.get_wch()
             except curses.error:
                 continue
             if question:
-                if key in ('\n', '\r', curses.KEY_ENTER):
+                if key in ("\n", "\r", curses.KEY_ENTER):
                     console.answers.put(answer)
-                    question, answer = None, ''
-                elif key in ('\x1b', '\x03'):
+                    question, answer = None, ""
+                elif key in ("\x1b", "\x03"):
                     console.answers.put(None)
                     question = None
-                elif key in ('\x7f', '\b', curses.KEY_BACKSPACE):
+                elif key in ("\x7f", "\b", curses.KEY_BACKSPACE):
                     answer = answer[:-1]
-                elif key == '\x15':
-                    answer = ''
+                elif key == "\x15":
+                    answer = ""
                 elif isinstance(key, str) and key.isprintable():
                     answer += key
             elif key in (curses.KEY_PPAGE, curses.KEY_UP):
-                scroll = min(max(0, len(wrapped) - 1), scroll + (body_rows if key == curses.KEY_PPAGE else 1))
+                scroll = min(
+                    max(0, len(wrapped) - 1),
+                    scroll + (body_rows if key == curses.KEY_PPAGE else 1),
+                )
             elif key in (curses.KEY_NPAGE, curses.KEY_DOWN):
                 scroll = max(0, scroll - (body_rows if key == curses.KEY_NPAGE else 1))
-            elif done and key in ('\n', '\r', '\x1b', 'q', 'Q', curses.KEY_ENTER):
+            elif done and key in ("\n", "\r", "\x1b", "q", "Q", curses.KEY_ENTER):
                 return
-            elif done and key in ('c', 'C'):
-                subprocess.run(['/usr/bin/pbcopy'], input='\n'.join(lines), text=True, check=False)
-            elif key == '\x03' and not done:
+            elif done and key in ("c", "C"):
+                subprocess.run(
+                    ["/usr/bin/pbcopy"], input="\n".join(lines), text=True, check=False
+                )
+            elif key == "\x03" and not done:
                 console.cancelled.set()
-                lines.append('Stopping after the current operation returns...')
+                lines.append("Stopping after the current operation returns...")
                 revision += 1
 
     try:
@@ -254,4 +329,4 @@ def run(task, items, selected, status=''):
             console.answers.put(None)
             thread.join()
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, original_terminal)
-    return outcome.get('result')
+    return outcome.get("result")

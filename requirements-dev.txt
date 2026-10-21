@@ -1,0 +1,6 @@
+# Development tools run on Python 3.11+; application compatibility stays at 3.8+.
+black==26.10.1
+ruff==0.17.1
+# Last mypy release supporting Python 3.8 as a checking target.
+mypy==1.14.1
+pre-commit==4.7.0

@@ -1,0 +1,28 @@
+minimum_pre_commit_version: '4.0.0'
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: Ruff lint and import sorting
+        entry: python -m ruff check --fix
+        language: system
+        types: [python]
+      - id: black
+        name: Black formatting
+        entry: python -m black
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy application types
+        entry: python -m mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: commitlint
+        name: Conventional Commit message
+        entry: npm exec --no -- commitlint --edit
+        language: system
+        stages: [commit-msg]
+        always_run: true
