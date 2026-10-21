@@ -72,7 +72,9 @@ Weak metadata-only matches and broad perceptual matches never suppress an encode
 
 ## API compatibility
 
-These features need Stash's native `findDuplicateScenes`, duplicate scene filters, video-file fingerprints/ownership, `sceneUpdate`, `sceneMerge`, `moveFiles`, and `deleteFiles` APIs. Unsupported schemas report an error; they do not fall back to filesystem-only mutation.
+Each detection method uses the corresponding Stash API (for example, `findDuplicateScenes` for perceptual matches). File changes need native `sceneUpdate`, `sceneMerge`, `moveFiles`, or `deleteFiles` support as applicable. Unsupported required APIs report an error; they do not fall back to filesystem-only mutation.
+
+SmutWorks inspects the schema and omits optional `Scene.production_date` and `VideoFile.scenes` selections on older versions. Before file changes, versions without `VideoFile.scenes` verify ownership through paginated scene-path queries and exact file-ID checks. Shared or unverified assignments block the change. Schema capabilities are cached for the API connection; ownership is checked live.
 
 Implementation references:
 

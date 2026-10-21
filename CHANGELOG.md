@@ -2,6 +2,7 @@
 
 ## 0.1.0-alpha.3
 
+- Adapt duplicate scans and encode-output lookup to older Stash schemas without production dates or direct file ownership fields. Verify ownership through native scene-path queries before file changes.
 - Add pinned Ruff, Black, mypy, and commitlint development checks, local pre-commit/commit-msg hooks, and GitHub Actions enforcement. Format the existing Python code and add collection annotations for gradual type checking.
 - Remove the redundant Start Organizer.command launcher; use Start SmutWorks.command.
 - Show GraphQL validation messages for HTTP errors, including duplicate scans rejected with HTTP 422.

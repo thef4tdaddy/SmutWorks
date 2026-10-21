@@ -717,11 +717,41 @@ def review_encodes(o):
 DETAIL_FIELDS = "id title code director details urls date production_date rating100 organized o_counter play_count resume_time play_duration custom_fields groups{group{id}} galleries{id} studio{id} performers{id name gender} tags{id name} stash_ids{endpoint stash_id} files{id path size}"
 
 
+def stash_type_fields(api, name):
+    """Cache schema capabilities, never mutable scene/file assignments."""
+    cache = getattr(api, "_smutworks_type_fields", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        api._smutworks_type_fields = cache
+    if name not in cache:
+        result = api.gql(
+            "query($name:String!){__type(name:$name){fields{name}}}",
+            {"name": name},
+        )
+        fields = (result.get("__type") or {}).get("fields")
+        if not isinstance(fields, list):
+            raise RuntimeError("Could not inspect Stash " + name + " fields.")
+        cache[name] = {field["name"] for field in fields}
+    return cache[name]
+
+
+def compatible_scene_fields(api, selection):
+    # These optional fields were added after older Stash releases. Keep all
+    # required metadata selections so unexpected incompatibilities still fail.
+    if "production_date" not in stash_type_fields(api, "Scene"):
+        selection = selection.replace(" production_date", "")
+    if "scenes{id}" in selection and "scenes" not in stash_type_fields(
+        api, "VideoFile"
+    ):
+        selection = selection.replace(" scenes{id}", "")
+    return selection
+
+
 def exact_scenes(o, api, path):
     scope = o.path_scope(o.stash_paths(path), "EQUALS")
     query = (
         "query($scope:SceneFilterType!){findScenes(filter:{per_page:-1},scene_filter:$scope){scenes{"
-        + DETAIL_FIELDS
+        + compatible_scene_fields(api, DETAIL_FIELDS)
         + "}}}"
     )
     scenes = api.gql(query, {"scope": scope})["findScenes"]["scenes"]

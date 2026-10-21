@@ -67,17 +67,21 @@ def serialized_action(action):
 
 def scene(api, scene_id):
     return api.gql(
-        "query($id:ID!){findScene(id:$id){" + SCENE_FIELDS + "}}", {"id": str(scene_id)}
+        "query($id:ID!){findScene(id:$id){"
+        + features.compatible_scene_fields(api, SCENE_FIELDS)
+        + "}}",
+        {"id": str(scene_id)},
     )["findScene"]
 
 
 def scenes(api, scope):
     page = 1
+    fields = features.compatible_scene_fields(api, SCENE_FIELDS)
     while True:
         print("Reading Stash duplicate candidates, page", page, flush=True)
         data = api.gql(
             'query($page:Int!,$scope:SceneFilterType!){findScenes(filter:{page:$page,per_page:100,sort:"id",direction:ASC},scene_filter:$scope){scenes{'
-            + SCENE_FIELDS
+            + fields
             + "}}}",
             {"page": page, "scope": scope},
         )["findScenes"]["scenes"]
@@ -85,6 +89,44 @@ def scenes(api, scope):
         if len(data) < 100:
             break
         page += 1
+
+
+def file_owners(api, file):
+    """Use fresh scene assignments, including on versions without VideoFile.scenes."""
+    if "scenes" in features.stash_type_fields(api, "VideoFile"):
+        if "scenes" not in file:
+            raise RuntimeError(
+                "Stash did not report file scene assignments; action blocked."
+            )
+        native_owners = {str(row["id"]) for row in file["scenes"]}
+        if not native_owners:
+            raise RuntimeError(
+                "Could not verify file scene assignments; action blocked."
+            )
+        return native_owners
+    # Older Stash joins the scene path filter through all attached files. Match
+    # the actual file ID too; do not assume a pathname implies ownership.
+    owners: Set[str] = set()
+    page = 1
+    while True:
+        result = api.gql(
+            'query($page:Int!,$path:String!){findScenes(filter:{page:$page,per_page:100,sort:"id",direction:ASC},'
+            "scene_filter:{path:{value:$path,modifier:EQUALS}}){scenes{id files{id}}}}",
+            {"page": page, "path": file["path"]},
+        )["findScenes"]["scenes"]
+        owners.update(
+            str(row["id"])
+            for row in result
+            if any(
+                str(value["id"]) == str(file["id"]) for value in row.get("files") or []
+            )
+        )
+        if len(result) < 100:
+            break
+        page += 1
+    if not owners:
+        raise RuntimeError("Could not verify file scene assignments; action blocked.")
+    return owners
 
 
 def options(settings):
@@ -268,7 +310,7 @@ def collect(o, api, method, settings):
     if method in ("phash", "all"):
         groups = api.gql(
             "query($distance:Int!,$diff:Float!){findDuplicateScenes(distance:$distance,duration_diff:$diff){"
-            + SCENE_FIELDS
+            + features.compatible_scene_fields(api, SCENE_FIELDS)
             + "}}",
             {"distance": opt["phash_distance"], "diff": opt["duration_diff"]},
         )["findDuplicateScenes"]
@@ -337,6 +379,17 @@ def collect(o, api, method, settings):
         for row in rows:
             for file in row.get("files") or []:
                 file = dict(file)
+                if "scenes" not in file:
+                    # Observed attachments suffice for recommendations. File
+                    # changes separately verify ALL owners against Stash live.
+                    file["scenes"] = [
+                        {"id": str(owner["id"])}
+                        for owner in rows
+                        if any(
+                            str(value["id"]) == str(file["id"])
+                            for value in owner.get("files") or []
+                        )
+                    ]
                 file["local_path"] = str(o.canonical(file["path"]))
                 try:
                     path = features.checked_path(o, file["local_path"])
@@ -683,8 +736,7 @@ def apply_primary(o, api, document, group, file_id, merge=False):
         raise RuntimeError("Interactive media requires manual sidecar review.")
     allowed = {str(row["id"]) for row in rows}
     if any(
-        {str(v["id"]) for v in file.get("scenes") or []} - allowed
-        for file in group["files"]
+        not file_owners(api, file) <= allowed for row in rows for file in row["files"]
     ):
         raise RuntimeError(
             "A file is also attached outside this group. Resolve shared assignments manually."
@@ -803,12 +855,13 @@ def quarantine(o, api, document, group, file_id):
     )
     if file is None or keeper is None:
         raise RuntimeError("File/keeper is not part of this review.")
-    if {str(v["id"]) for v in file.get("scenes") or []} != {str(row["id"])}:
+    verified_files(o, group, document["options"]["duration_diff"])
+    row = fresh_group(o, api, document, group)[0]
+    current_file = next(v for v in row["files"] if str(v["id"]) == str(file_id))
+    if file_owners(api, current_file) != {str(row["id"])}:
         raise RuntimeError(
             "File is shared with other scenes. Resolve its assignments manually."
         )
-    verified_files(o, group, document["options"]["duration_diff"])
-    fresh_group(o, api, document, group)
     if row.get("interactive"):
         raise RuntimeError("Interactive media requires manual sidecar review.")
     source = features.checked_path(o, file["local_path"])
@@ -883,9 +936,7 @@ def quarantine_action(o, api, event, delete=False):
         ):
             raise RuntimeError("Keeper failed fresh inspection; deletion blocked.")
     file = next((v for v in row["files"] if str(v["id"]) == event["file_id"]), None)
-    if not file or {str(v["id"]) for v in file.get("scenes") or []} != {
-        event["scene_id"]
-    }:
+    if not file or file_owners(api, file) != {event["scene_id"]}:
         raise RuntimeError("File scene assignments changed. Review manually.")
     if delete:
         journal.append(

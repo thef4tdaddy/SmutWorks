@@ -50,6 +50,12 @@ class FakeAPI:
         variables = variables or {}
         self.calls.append((query, copy.deepcopy(variables)))
         if "__type" in query:
+            if variables.get("name"):
+                return {
+                    "__type": {
+                        "fields": [{"name": v} for v in ("production_date", "scenes")]
+                    }
+                }
             return {"__type": {"inputFields": [{"name": "full"}]}}
         if "findDuplicateScenes" in query:
             return {"findDuplicateScenes": copy.deepcopy(self.phash_groups)}
@@ -265,6 +271,111 @@ class DuplicateFixture(unittest.TestCase):
         self.api = FakeAPI([a, b])
         self.api.phash_groups = [copy.deepcopy([a, b])]
         return self.document("phash")
+
+
+class LegacyAPI(FakeAPI):
+    """Older schema: no Scene.production_date or VideoFile.scenes."""
+
+    def gql(self, query, variables=None, **kwargs):
+        variables = variables or {}
+        if "production_date" in query or "fingerprints{type value} scenes{id}" in query:
+            raise RuntimeError("Stash HTTP 422: unsupported field")
+        if "__type" in query and variables.get("name"):
+            self.calls.append((query, copy.deepcopy(variables)))
+            return {"__type": {"fields": [{"name": "id"}]}}
+        if "findScenes(" in query and "path" in variables:
+            self.calls.append((query, copy.deepcopy(variables)))
+            rows = [
+                row
+                for row in self.rows.values()
+                if any(file["path"] == variables["path"] for file in row["files"])
+            ]
+            start = (variables["page"] - 1) * 100
+            return {
+                "findScenes": {
+                    "scenes": [
+                        {
+                            "id": row["id"],
+                            "files": [{"id": f["id"]} for f in row["files"]],
+                        }
+                        for row in rows[start : start + 100]
+                    ]
+                }
+            }
+        result = super().gql(query, variables, **kwargs)
+
+        def strip(value):
+            if isinstance(value, dict):
+                value.pop("production_date", None)
+                for file in value.get("files") or []:
+                    file.pop("scenes", None)
+                for nested in value.values():
+                    strip(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    strip(nested)
+
+        strip(result)
+        return result
+
+
+class LegacyCompatibilityTests(DuplicateFixture):
+    def setUp(self):
+        super().setUp()
+        self.api = LegacyAPI([self.row])
+
+    def test_attached_scan_works_without_new_fields_and_is_read_only(self):
+        document = self.document()
+        self.assertEqual(document["groups"][0]["recommendation"], "2")
+        self.assertEqual(self.mutations(), [])
+        self.assertEqual(d.scene(self.api, "1"), document["groups"][0]["scenes"][0])
+        self.assertEqual(sum("__type" in query for query, _ in self.api.calls), 2)
+
+    def test_perceptual_scan_uses_compatible_selection(self):
+        self.api.phash_groups = [[self.row]]
+        self.assertEqual(len(self.document("phash")["groups"]), 1)
+
+    def test_encoding_output_lookup_omits_unsupported_production_date(self):
+        rows = d.features.exact_scenes(o, self.api, Path(self.file1["path"]))
+        self.assertEqual([row["id"] for row in rows], ["1"])
+
+    def test_legacy_primary_selection_still_checks_all_owners(self):
+        document = self.document()
+        shared = self.row_value("9", [copy.deepcopy(self.file1)])
+        self.api.rows["9"] = shared
+        with self.assertRaisesRegex(RuntimeError, "outside this group"):
+            d.apply_primary(o, self.api, document, document["groups"][0], "2")
+        self.assertEqual(self.mutations(), [])
+
+    def test_legacy_quarantine_and_restore(self):
+        event = self.quarantine_one()
+        d.quarantine_action(o, self.api, event)
+        self.assertTrue(Path(event["source"]).exists())
+
+    def test_legacy_quarantine_and_delete(self):
+        event = self.quarantine_one()
+        d.quarantine_action(o, self.api, event, delete=True)
+        self.assertFalse(Path(event["target"]).exists())
+
+    def test_legacy_shared_file_blocks_quarantine(self):
+        self.api.rows["1"]["files"].reverse()
+        document = self.document()
+        self.api.rows["9"] = self.row_value("9", [copy.deepcopy(self.file1)])
+        with self.assertRaisesRegex(RuntimeError, "shared with other scenes"):
+            d.quarantine(o, self.api, document, document["groups"][0], "1")
+        self.assertTrue(Path(self.file1["path"]).exists())
+
+    def test_owner_lookup_checks_ids_and_all_pages(self):
+        self.api.rows = {
+            str(i): self.row_value(str(i), [self.file1]) for i in range(101)
+        }
+        self.assertEqual(len(d.file_owners(self.api, self.file1)), 101)
+        self.assertEqual(
+            [args["page"] for query, args in self.api.calls if "path" in args], [1, 2]
+        )
+        wrong = dict(self.file1, id="999")
+        with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+            d.file_owners(self.api, wrong)
 
 
 class DuplicateTests(DuplicateFixture):
