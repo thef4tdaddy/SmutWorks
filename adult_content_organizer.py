@@ -183,7 +183,19 @@ class API:
             with self.opener.open(request, timeout=timeout) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as error:
-            raise RuntimeError('Stash HTTP ' + str(error.code)) from None
+            # GraphQL validation failures commonly use HTTP 422. Preserve their
+            # messages instead of hiding the field/type that Stash rejected.
+            detail = ''
+            try:
+                payload = json.loads(error.read(65536))
+                messages = payload.get('errors', []) if isinstance(payload, dict) else []
+                detail = '; '.join(str(e.get('message', 'GraphQL error'))
+                    for e in messages if isinstance(e, dict))[:1000]
+            except (ValueError, OSError):
+                pass
+            finally:
+                error.close()
+            raise RuntimeError('Stash HTTP ' + str(error.code) + (': ' + detail if detail else '')) from None
         if result.get('errors'):
             messages = '; '.join(str(e.get('message', 'GraphQL error')) for e in result['errors'])
             raise RuntimeError(messages[:500])

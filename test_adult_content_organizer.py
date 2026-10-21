@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -294,6 +295,22 @@ class MetadataFlagTests(unittest.TestCase):
 
 
 class MacPathTests(unittest.TestCase):
+    def test_graphql_http_validation_error_includes_server_message(self):
+        api = o.API({'stash_url': 'http://example.test:9999', 'api_key': 'secret'})
+        error = o.urllib.error.HTTPError(api.url, 422, 'Unprocessable Entity', {},
+            io.BytesIO(json.dumps({'errors': [{'message': 'Cannot query field "production_date" on type "Scene".'}]}).encode()))
+        with patch.object(api.opener, 'open', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, 'Stash HTTP 422: Cannot query field') as caught:
+                api.gql('query{findScenes{scenes{id}}}')
+        self.assertNotIn('secret', str(caught.exception))
+
+    def test_non_graphql_http_error_keeps_status_without_html(self):
+        api = o.API({'stash_url': 'http://example.test:9999'})
+        error = o.urllib.error.HTTPError(api.url, 502, 'Bad Gateway', {}, io.BytesIO(b'<html>proxy error</html>'))
+        with patch.object(api.opener, 'open', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, '^Stash HTTP 502$'):
+                api.gql('query{findScenes{scenes{id}}}')
+
     def test_incoming_and_media_aliases_map_to_same_mounted_file(self):
         with patch.object(o, 'SHARE_ROOT', Path('/Volumes/Test Share')):
             a = o.canonical('/incoming/SeedboxSync/xxx/test.mp4')

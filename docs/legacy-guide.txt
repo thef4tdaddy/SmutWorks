@@ -9,9 +9,9 @@ SMUTWORKS — LEGACY FEATURE GUIDE — MAC TERMINAL APP
 QUICK START / UPDATE
 Unzip to a writable folder you will keep, such as Documents. Replace ALL
 app files when updating, including the new organizer_features.py and
-organizer_journal.py. Keep the app's five Python modules together.
-Double-click Start Organizer.command, or type python3 plus a space in
-Terminal, drag adult_content_organizer.py into it, and press Return.
+organizer_journal.py. Keep all application Python modules together.
+Double-click Start SmutWorks.command, or run python3 smutworks.py from
+the application folder in Terminal.
 Requires Python 3.8+; standard library only. ffprobe and HandBrakeCLI are
 needed for encoding/review, not for metadata-only Stash cleanup checks.
 

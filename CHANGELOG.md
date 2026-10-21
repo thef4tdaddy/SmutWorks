@@ -2,6 +2,8 @@
 
 ## 0.1.0-alpha.3
 
+- Remove the redundant Start Organizer.command launcher; use Start SmutWorks.command.
+- Show GraphQL validation messages for HTTP errors, including duplicate scans rejected with HTTP 422.
 - Replace the flat action menu with six sections, back navigation, local shortcuts, section-specific task sidebars, and session selection memory.
 - Share one Preferred quality profile across encoding, candidate discovery, and duplicate recommendations. Migrate older encoding settings; preserve saved queue targets.
 - Add optional minimum estimated savings in MiB and percent.
