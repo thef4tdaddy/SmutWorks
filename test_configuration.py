@@ -70,7 +70,8 @@ class ConfigurationTests(unittest.TestCase):
         answers = ['http://localhost:9999','/Volumes/Example','incoming','library','/data', '-', '*', 'unlinked', 'SmutWorks', 'no']
         with tempfile.TemporaryDirectory() as tmp, patch.object(o,'CONFIG_FILE',Path(tmp)/'settings.json'), patch.object(o,'prompt',side_effect=answers), patch.object(o.getpass,'getpass',return_value=''), patch.object(o,'set_paths'):
             result = o.configure(old)
-        self.assertEqual(result['encoding'], old['encoding'])
+        self.assertEqual(result['preferred_quality']['video_kbps'], old['encoding']['video_kbps'])
+        self.assertNotIn('encoding', result)
         self.assertEqual(result['custom_future_setting'], 'keep')
         self.assertEqual(result['api_key'], 'fake-test-key')
         self.assertEqual(result['stash_aliases'], [])

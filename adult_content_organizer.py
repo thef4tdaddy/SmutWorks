@@ -20,7 +20,7 @@ import urllib.request
 SHARE_ROOT = Path('/Volumes/Media')
 MEDIA_ROOT = SHARE_ROOT / 'media/scenes'
 INCOMING_ROOT = SHARE_ROOT / 'incoming'
-APP_VERSION = '0.1.0-alpha.2'
+APP_VERSION = '0.1.0-alpha.3'
 # Reuse an existing installation's private state without moving or losing settings.
 LEGACY_STATE_DIR = Path.home() / 'Library/Application Support/Adult Content Organizer'
 STATE_DIR = Path(os.environ.get('SMUTWORKS_CONFIG_DIR') or (
@@ -45,7 +45,7 @@ SMALL_FILE_LIMIT = 10 * 1024 * 1024
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.heic'}
 VIDEO_EXTENSIONS = encoding_queue.EXTENSIONS | {'.mpg', '.mpeg', '.m2ts', '.mts', '.vob', '.flv', '.3gp', '.ogv'}
 LEFTOVER_IMAGES = 'leftover images'
-PROTECTED = {LEFTOVER_IMAGES, '.sync', '.archive', '.stfolder', '.stignore', '.synclist', '@eadir', '#recycle'}
+PROTECTED = {'smutworks quarantine', LEFTOVER_IMAGES, '.sync', '.archive', '.stfolder', '.stignore', '.synclist', '@eadir', '#recycle'}
 FLAG_TITLE = 'ACO - Needs title'
 FLAG_PERFORMER = 'ACO - Needs female performer'
 FLAG_GENERAL = 'ACO - Needs metadata'
@@ -665,7 +665,7 @@ def move_leftover_images():
     roots = [INCOMING_ROOT, MEDIA_ROOT]
     document = json.loads(CLEANUP_FILE.read_text())
     if document.get('version') != 3 or document.get('roots') != [str(root) for root in roots]:
-        raise RuntimeError('Run option 7 again to create a current image-move preview.')
+        raise RuntimeError('Run Cleanup → Scan empty folders and leftovers again to create a current image-move preview.')
     outcomes = []
     moved, skipped = 0, 0
     report = CLEANUP_FILE.with_name('image-move-results.json')
@@ -676,7 +676,7 @@ def move_leftover_images():
             raise RuntimeError('Image preview contains a folder outside the configured roots.')
         relative = folder.relative_to(root)
         if any(protected_name(part) for part in relative.parts) or folder.is_symlink() or not beneath(folder.resolve(), root.resolve()):
-            raise RuntimeError('Image source folder changed or is protected. Run option 7 again.')
+            raise RuntimeError('Image source folder changed or is protected. Run Cleanup → Scan empty folders and leftovers again.')
         for file in item['file_details']:
             name = file['name']
             if file['kind'] != 'image' or Path(name).suffix.casefold() not in IMAGE_EXTENSIONS:
@@ -852,27 +852,6 @@ def connection_test(settings):
     print('Organized root:', 'found' if MEDIA_ROOT.is_dir() else 'NOT FOUND')
 
 
-MENU = '''
-SmutWorks
-
-  1  Connection and folder settings
-  2  Test Stash connection and media folders
-  3  Preview file organization
-  4  Move files from the saved preview
-  5  Preview missing-metadata flags
-  6  Update missing-metadata flags in Stash
-  7  Preview empty and image/small-file-only folders in BOTH roots
-  8  Remove previewed empty folders
-  9  View the last saved report
- 10  Scan videos and export encoding list
- 11  Encode the saved list with HandBrakeCLI
- 12  Show copy-and-paste encoding command
- 13  Move previewed images into each root’s leftover images folder
- 14  Run Stash cleanup filters
-  0  Exit
-'''
-
-
 MENU_ITEMS = [
     ('1', 'Connection and folder settings'), ('2', 'Test connection and folders'),
     ('3', 'Preview organization'), ('4', 'Move previewed media'),
@@ -902,129 +881,14 @@ MENU_DESCRIPTIONS = {
 import organizer_features
 MENU_ITEMS[-1:-1] = organizer_features.ITEMS
 MENU_DESCRIPTIONS.update(organizer_features.DESCRIPTIONS)
-MENU = '\nSmutWorks\n\n' + '\n'.join(' {:>2}  {}'.format(*item) for item in MENU_ITEMS) + '\n'
-
-
-def menu_selection(current, key, typed=''):
-    """Handle selection without executing actions; Enter alone commits a choice."""
-    if key in ('UP', 'DOWN', 'HOME', 'END'):
-        if key == 'UP':
-            current = (current - 1) % len(MENU_ITEMS)
-        elif key == 'DOWN':
-            current = (current + 1) % len(MENU_ITEMS)
-        else:
-            current = 0 if key == 'HOME' else len(MENU_ITEMS) - 1
-        return current, '', None
-    if key == 'QUIT':
-        return current, typed, '0'
-    if key == 'ENTER':
-        if typed:
-            return current, typed, typed if typed in dict(MENU_ITEMS) else None
-        return current, typed, MENU_ITEMS[current][0]
-    if key == 'BACKSPACE':
-        return current, typed[:-1], None
-    if key.isdigit() and len(key) == 1:
-        return current, (typed + key)[-2:], None
-    return current, typed, None
+import duplicate_review
+MENU_ITEMS[-1:-1] = duplicate_review.ITEMS
+MENU_DESCRIPTIONS.update(duplicate_review.DESCRIPTIONS)
 
 
 def choose_menu(settings, previous='1'):
-    if not sys.stdin.isatty() or not sys.stdout.isatty() or os.environ.get('TERM') == 'dumb':
-        print(MENU)
-        return input('Choose: ').strip()
-    import curses
-    import termios
-    terminal_settings = termios.tcgetattr(sys.stdin.fileno())
-    current = next((i for i, item in enumerate(MENU_ITEMS) if item[0] == previous), 0)
-    def screen(window):
-        nonlocal current
-        typed = ''
-        window.keypad(True)
-        try:
-            curses.curs_set(0)
-        except curses.error:
-            pass
-        color = False
-        if curses.has_colors():
-            curses.start_color()
-            try:
-                curses.use_default_colors()
-                background = -1
-            except curses.error:
-                background = curses.COLOR_BLACK
-            for number, fg, bg in [(1, curses.COLOR_CYAN, background),
-                    (2, curses.COLOR_WHITE, curses.COLOR_BLUE),
-                    (3, curses.COLOR_GREEN, background), (4, curses.COLOR_YELLOW, background)]:
-                curses.init_pair(number, fg, bg)
-            color = True
-        accent = curses.color_pair(1) | curses.A_BOLD if color else curses.A_BOLD
-        selected = curses.color_pair(2) | curses.A_BOLD if color else curses.A_REVERSE
-        good = curses.color_pair(3) if color else curses.A_NORMAL
-        while True:
-            window.erase()
-            height, width = window.getmaxyx()
-            def write(row, col, text, style=0, limit=None):
-                available = max(0, width - col - 1)
-                if limit is not None:
-                    available = min(available, limit)
-                if 0 <= row < height - 1 and available:
-                    try:
-                        window.addnstr(row, col, text, available, style)
-                    except curses.error:
-                        pass
-            if height < 14 or width < 45:
-                write(0, 0, 'SmutWorks', accent)
-                write(2, 0, 'Enlarge Terminal for the full menu.')
-                write(4, 0, MENU_ITEMS[current][1], selected)
-                write(6, 0, 'Up/Down: move | Enter: select | Q: exit')
-            else:
-                write(1, 2, 'SMUTWORKS  ' + APP_VERSION, accent)
-                write(2, 2, 'Stash library tools  /  Cleanup  /  HandBrake', curses.A_DIM)
-                configured = settings is not None
-                mounted = configured and SHARE_ROOT.is_dir()
-                status = 'SETUP NEEDED' if not configured else ('MEDIA AVAILABLE' if mounted else 'MEDIA UNAVAILABLE')
-                write(1, max(29, width - len(status) - 3), status, good if mounted else accent)
-                write(4, 2, 'Stash: ' + settings['stash_url'] if configured else 'Start with Connection and folder settings.', curses.A_DIM)
-                rows = max(1, height - 11)
-                start = max(0, min(current - rows + 1, len(MENU_ITEMS) - rows))
-                split = width >= 80
-                panel = min(52, width // 2) if split else width - 3
-                write(6, 2, 'ACTIONS', accent)
-                for offset, (number, label) in enumerate(MENU_ITEMS[start:start + rows]):
-                    index = start + offset
-                    text = '{} {:>2}  {}'.format('>' if index == current else ' ', number, label)
-                    write(7 + offset, 2, text.ljust(panel - 2), selected if index == current else 0, panel - 2)
-                category, description = MENU_DESCRIPTIONS[MENU_ITEMS[current][0]]
-                if split:
-                    x = panel + 3
-                    write(6, x, category, accent)
-                    for offset, line in enumerate(textwrap.wrap(description, width=max(20, width - x - 4))):
-                        if 8 + offset < height - 4:
-                            write(8 + offset, x, line)
-                    write(height - 6, x, 'Reports: ./reports/', curses.A_DIM)
-                else:
-                    write(height - 4, 2, category + ' | ' + description, curses.A_DIM)
-                write(height - 3, 2, 'NUMBER: ' + typed if typed else 'UP / DOWN  Move    ENTER  Select    Q  Exit', accent)
-                write(height - 2, 2, 'Type a number + Enter for a shortcut.  More actions below' if start + rows < len(MENU_ITEMS) else 'Type a number + Enter for a shortcut.', curses.A_DIM)
-            window.refresh()
-            key = window.getch()
-            mapped = {curses.KEY_UP: 'UP', curses.KEY_DOWN: 'DOWN', curses.KEY_HOME: 'HOME',
-                      curses.KEY_END: 'END', curses.KEY_ENTER: 'ENTER', 10: 'ENTER', 13: 'ENTER',
-                      curses.KEY_BACKSPACE: 'BACKSPACE', 127: 'BACKSPACE', 8: 'BACKSPACE',
-                      ord('q'): 'QUIT', ord('Q'): 'QUIT', 27: 'QUIT'}
-            if key == 3:
-                raise KeyboardInterrupt
-            action = mapped.get(key, chr(key) if 0 <= key < 256 else '')
-            current, typed, choice = menu_selection(current, action, typed)
-            if choice is not None:
-                return choice
-    try:
-        return curses.wrapper(screen)
-    except curses.error:
-        print(MENU)
-        return input('Choose: ').strip()
-    finally:
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, terminal_settings)
+    import grouped_menu
+    return grouped_menu.choose(settings, previous, MENU_ITEMS, MENU_DESCRIPTIONS, APP_VERSION)
 
 
 def perform_choice(choice, settings):
@@ -1037,7 +901,10 @@ def perform_choice(choice, settings):
             if path.exists():
                 print('\n' + path.name + '\n' + path.read_text())
     elif not settings:
-        print('Choose 1 and save your connection settings first.')
+        print('Open Settings & History → Connection and folder settings first.')
+    elif choice in {'24', '25', '26', '27', '28'}:
+        import duplicate_review
+        return duplicate_review.handle(choice, sys.modules[__name__], settings)
     elif choice in {str(number) for number in range(15, 24)}:
         import organizer_features
         return organizer_features.handle(choice, sys.modules[__name__], settings)
@@ -1047,7 +914,7 @@ def perform_choice(choice, settings):
         print(move_leftover_images())
     elif choice == '12':
         if not ENCODING_FILE.exists():
-            raise RuntimeError('Choose 10 to scan and save an encoding list first.')
+            raise RuntimeError('Open Encoding and build an encoding list first.')
         print('Copy this command into Terminal. It starts encoding the saved list:')
         command_text = encoding_queue.queue_command(ENCODING_FILE)
         print('\n' + command_text + '\n')
@@ -1075,10 +942,13 @@ def perform_choice(choice, settings):
         def checkpoint(files):
             save_document(PROBE_CACHE_FILE, {'version': 1, 'files': files})
         try:
-            document = encoding_queue.scan(INCOMING_ROOT if scope == '1' else MEDIA_ROOT, protected_name, cache, checkpoint, encoding_queue.config(settings.get('encoding')))
+            document = encoding_queue.scan(INCOMING_ROOT if scope == '1' else MEDIA_ROOT, protected_name, cache, checkpoint, encoding_queue.profile(settings))
         finally:
             checkpoint(cache)
         print('Video metadata: {} cached; {} freshly inspected.'.format(document['scan_stats']['cached'], document['scan_stats']['probed']))
+        document = encoding_queue.apply_savings_limits(document)
+        import duplicate_review
+        duplicate_review.suppress_redundant_encodes(sys.modules[__name__], document, settings)
         save_document(ENCODING_FILE, document)
         encoding_queue.write_csv(ENCODING_CSV, document)
         for job in document['jobs'][:100]:
@@ -1140,7 +1010,7 @@ def main():
                 if sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
                     import terminal_dashboard
                     updated = terminal_dashboard.run(lambda: perform_choice(choice, settings),
-                        MENU_ITEMS, choice, 'Stash: ' + settings['stash_url'] if settings else 'Connection setup')
+                        __import__('grouped_menu').sidebar(choice, MENU_ITEMS), choice, 'Stash: ' + settings['stash_url'] if settings else 'Connection setup')
                     if updated is not None:
                         settings = updated
                 else:

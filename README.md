@@ -4,14 +4,16 @@
 
 A terminal-based adult media toolkit for **Stash**, **Whisparr Sync**, and **HandBrakeCLI**.
 
-**0.1.0-alpha.2 · macOS · Python 3.8+ · Python standard library only**
+**0.1.0-alpha.3 · macOS · Python 3.8+ · Python standard library only**
 
 ## Features
 
 - Preview and organize incoming scenes using Stash titles and performers matching configurable gender preferences.
 - Flag missing metadata while preserving your other Stash tags.
 - Find empty directories and leftover images/small files in incoming and organized media folders.
-- Compare multiple files attached to a Stash scene.
+- Review files attached to one scene and Stash duplicate groups found by perceptual hash, exact stored fingerprints, Stash IDs, URLs, or titles.
+- Recommend keepers by quality, preferred encoding, or smallest matching file; manual selection is always available.
+- Consolidate compatible metadata, set a primary file, and separately quarantine/restore/delete reviewed non-primary copies through Stash.
 - Build encoding queues from Stash metadata or a cached filesystem scan.
 - **Encode the largest estimated space savings first**, with estimated output size and reduction in the CSV report.
 - **Keep the current filename, queue position, progress, speed, ETA, and processing stage above the scrolling log.** The filename remains visible after an error.
@@ -43,17 +45,31 @@ Use **Connection and folder settings** to configure your own Stash URL, API key,
 
 Configure the local media root and the equivalent root as seen by Stash; no particular NAS, hostname, or Docker mount name is required. Optional aliases support multiple mounts of the same root. See [configuration](docs/configuration.md) for examples and migration behavior. See [the feature guide](docs/legacy-guide.txt) for detailed menu behavior.
 
-## Encoding
+## Menus
 
-Default output is H.265 10-bit MKV, maximum 1920×1080, 5,000 kbps video, beside the source with ` - reencoded.mkv` appended. The first audio track is copied when supported, with AAC fallback. Settings are editable; saved queues retain their own target settings.
+**Organize · Metadata · Duplicates · Encoding · Cleanup · Settings & History**
 
-Both scan methods rank jobs by **estimated bytes saved**, rather than filename or percentage. Existing saved queues are also ranked when started. Estimates account for duration, target video bitrate, a conservative source audio/non-video allowance, and 1% container overhead. Audio passthrough, variable bitrate, and encoder behavior mean actual sizes can differ. Missing estimates sort last.
+Use arrows and Enter to navigate. Esc/Left goes back. Numbers are local to the current submenu, so there is no long numbered feature list. Selection is remembered within the session. See [navigation](docs/navigation.md).
+
+## Preferred quality & encoding
+
+Default output is H.265 10-bit MKV, maximum 1920×1080, 5,000 kbps video, beside the source with ` - reencoded.mkv` appended. The first audio track is copied when supported, with AAC fallback. Edit **Settings & History → Preferred quality profile** to set one shared standard for encoding, discovery, and duplicate recommendations. Saved queues retain their own target settings.
+
+Both scan methods rank jobs by **estimated bytes saved**, rather than filename or percentage. Existing saved queues are also ranked when started. Estimates account for duration, target video bitrate, a conservative source audio/non-video allowance, and 1% container overhead. Audio passthrough, variable bitrate, and encoder behavior mean actual sizes can differ. Missing estimates sort last. Optional minimum savings in MiB and percent omit low-value conversions; 0 disables each cutoff. If both are enabled, both must pass. Smaller/lower-bitrate sources are not upscaled or inflated merely to match the profile.
 
 **Originals are kept.** Estimated savings describe a potential reduction if the source is eventually replaced; encoding alone uses additional disk space. The tool does not automatically delete originals. HDR sources are excluded/rechecked for manual review.
 
 The fixed status panel shows the **queue file number** separately from HandBrake's internal task counter. It remains independent of log scrolling and changes stage while verifying outputs. Short terminals show fewer header lines.
 
 Encoding currently reads and writes directly on the configured share. Keep the Mac awake and the network share connected. A failed encode or failed verification retains a hidden `.aco-partial-*.mkv` output for inspection; it is not automatically resumed or recovered. Remote monitoring and local staging are not implemented yet.
+
+## Duplicates
+
+Open **Duplicates → Find duplicate groups**, then **Review duplicates and choose keepers**. Reports explain the match basis, recommendation, and potential reduction. Recommendations are advisory; duration differences and metadata conflicts require manual review.
+
+Primary changes retain media. Merging combines compatible metadata and removes source scene records, with a snapshot saved first. Quarantine, restore, and deletion are separate confirmed actions; deletion is limited to a recorded, unchanged non-primary file with a verified keeper. See [the duplicate workflow](docs/duplicates.md) for details and limits.
+
+Both encoding queue builders can use a current duplicate review to skip a redundant conversion when a verified preferred copy already exists. Metadata-only matches never suppress encodes. Scans and encodes do not delete media.
 
 ## Settings, reports, and upgrades
 

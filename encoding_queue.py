@@ -15,7 +15,7 @@ EXTENSIONS = {'.mp4', '.mkv', '.mov', '.m4v', '.avi', '.wmv', '.ts', '.webm'}
 TARGET = {'width': 1920, 'height': 1080, 'video_kbps': 5000, 'audio_kbps': 160, 'audio_mode': 'copy-first-with-aac-fallback'}
 
 
-DEFAULT_CONFIG = dict(TARGET, encoder='auto', min_video_kbps=6500)
+DEFAULT_CONFIG = dict(TARGET, encoder='auto', min_video_kbps=6500, min_savings_mib=0, min_savings_percent=0)
 
 
 def config(value=None):
@@ -24,7 +24,8 @@ def config(value=None):
         raise RuntimeError('Unsupported encoding settings; rebuild the encoding list.')
     target = dict(DEFAULT_CONFIG, **value)
     limits = {'width': (320, 7680), 'height': (180, 4320), 'video_kbps': (500, 100000),
-              'audio_kbps': (64, 512), 'min_video_kbps': (500, 200000)}
+              'audio_kbps': (64, 512), 'min_video_kbps': (500, 200000),
+              'min_savings_mib': (0, 1000000), 'min_savings_percent': (0, 99)}
     for key, (minimum, maximum) in limits.items():
         if type(target[key]) is not int or not minimum <= target[key] <= maximum:
             raise RuntimeError('Invalid encoding setting: ' + key)
@@ -33,6 +34,27 @@ def config(value=None):
     if target['encoder'] not in ('auto', 'vt_h265_10bit', 'x265_10bit') or target['audio_mode'] != 'copy-first-with-aac-fallback':
         raise RuntimeError('Unsupported encoder/audio mode.')
     return target
+
+
+def profile(settings):
+    """One profile for discovery, encoding, and duplicate recommendations."""
+    return config(settings.get('preferred_quality', settings.get('encoding')))
+
+
+def apply_savings_limits(document):
+    target = config(document['target'])
+    jobs, excluded = [], 0
+    enabled = target['min_savings_mib'] or target['min_savings_percent']
+    for job in rank_jobs(document['jobs'], target):
+        if enabled and (job['estimated_savings_bytes'] is None or
+            job['estimated_savings_bytes'] < target['min_savings_mib'] * 1024**2 or
+            job['estimated_savings_percent'] < target['min_savings_percent']):
+            excluded += 1
+        else:
+            jobs.append(job)
+    document['jobs'] = jobs
+    document['skipped']['below minimum estimated savings'] = excluded
+    return document
 
 
 def summary(target=None):
@@ -120,7 +142,20 @@ def details(data):
         rate = max(0, float(fmt.get('bit_rate') or 0) - sum(
             float(s.get('bit_rate') or 0) for s in data.get('streams', [])
             if s.get('codec_type') == 'audio'))
-    return {'width': int(video.get('width') or 0), 'height': int(video.get('height') or 0),
+    pixel = video.get('pix_fmt') or ''
+    import re
+    match = re.search(r'(?:p|gray)(10|12|14|16)(?:le|be)?$', pixel)
+    depth = 0
+    for field in ('bits_per_raw_sample', 'bits_per_sample'):
+        try:
+            depth = int(video.get(field) or 0)
+        except (ValueError, TypeError):
+            depth = 0
+        if depth > 0:
+            break
+    if not depth and match:
+        depth = int(match.group(1))
+    return {'bit_depth': depth, 'width': int(video.get('width') or 0), 'height': int(video.get('height') or 0),
         'codec': video.get('codec_name', 'unknown'), 'video_kbps': round(rate / 1000),
         'duration': duration, 'hdr': video.get('color_transfer') in ('smpte2084', 'arib-std-b67')}
 
@@ -141,8 +176,10 @@ def reason(info, target=None):
 
 
 def valid_cached_info(info):
-    return (isinstance(info, dict) and set(info) == {'width', 'height', 'codec', 'video_kbps', 'duration', 'hdr'}
+    return (isinstance(info, dict) and set(info) in ({'width', 'height', 'codec', 'video_kbps', 'duration', 'hdr'},
+            {'width', 'height', 'codec', 'video_kbps', 'duration', 'hdr', 'bit_depth'})
         and all(isinstance(info[key], int) and info[key] >= 0 for key in ('width', 'height', 'video_kbps'))
+        and (not 'bit_depth' in info or type(info['bit_depth']) is int and info['bit_depth'] >= 0)
         and isinstance(info['duration'], (int, float)) and math.isfinite(info['duration'])
         and isinstance(info['codec'], str) and isinstance(info['hdr'], bool))
 

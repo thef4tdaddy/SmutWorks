@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+- Replace the flat action menu with six sections, back navigation, local shortcuts, section-specific task sidebars, and session selection memory.
+- Share one Preferred quality profile across encoding, candidate discovery, and duplicate recommendations. Migrate older encoding settings; preserve saved queue targets.
+- Add optional minimum estimated savings in MiB and percent.
+- Find duplicate groups through Stash perceptual matches, stored MD5/SHA256 fingerprints, Stash IDs, URLs, titles, and attached files.
+- Add explained quality/preferred/smallest/manual recommendations, duration checks, and advisory savings reports.
+- Add guarded native primary selection and metadata consolidation, explicit quarantine/restore, and separate deletion of a recorded quarantined non-primary file.
+- Journal duplicate operations and metadata snapshots; verify files/metadata and share the encoding lock for file changes.
+- Avoid redundant encodes when an existing duplicate copy passes fresh preferred-quality checks; weak matches never suppress encoding.
+- Add regression tests for navigation, profile migration, recommendations, metadata retention, and file-operation guards.
+
 ## 0.1.0-alpha.2
 
 - Add a standard Python package and `smutworks` command with help, version, and directory overrides.

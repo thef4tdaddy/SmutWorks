@@ -1,3 +1,5 @@
+CURRENT NAVIGATION: see docs/navigation.md. Numbered actions below describe the old flat menu, not current menu shortcuts.
+
 LEGACY FEATURE REFERENCE
 For current setup, path mapping, organization policy, and report locations, see docs/configuration.md.
 This reference describes the original defaults; settings can override them.

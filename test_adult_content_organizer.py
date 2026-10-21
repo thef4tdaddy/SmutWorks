@@ -398,29 +398,6 @@ class LeftoverImageMoveTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
 
 
-class MenuNavigationTests(unittest.TestCase):
-    def test_arrow_wrap_and_enter(self):
-        current, typed, choice = o.menu_selection(0, 'UP')
-        self.assertEqual(current, len(o.MENU_ITEMS) - 1)
-        self.assertIsNone(choice)
-        current, typed, choice = o.menu_selection(current, 'DOWN')
-        self.assertEqual(current, 0)
-        self.assertEqual(o.menu_selection(current, 'ENTER')[2], '1')
-
-    def test_number_shortcut_requires_enter_and_accepts_13(self):
-        current, typed, choice = o.menu_selection(0, '1')
-        self.assertIsNone(choice)
-        current, typed, choice = o.menu_selection(current, '3', typed)
-        self.assertIsNone(choice)
-        self.assertEqual(o.menu_selection(current, 'ENTER', typed)[2], '13')
-        self.assertIsNone(o.menu_selection(current, 'ENTER', '99')[2])
-
-    def test_arrow_clears_number_and_quit(self):
-        current, typed, _ = o.menu_selection(0, 'DOWN', '13')
-        self.assertEqual(typed, '')
-        self.assertEqual(o.menu_selection(current, 'ENTER', typed)[2], '2')
-        self.assertEqual(o.menu_selection(current, 'QUIT')[2], '0')
-
 
 class OrganizationReportTests(unittest.TestCase):
     def test_summary_is_compact_and_report_has_full_metadata_and_moves(self):

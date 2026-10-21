@@ -8,7 +8,7 @@ import time
 import encoding_queue as encoding
 import organizer_journal as journal
 
-ITEMS = [('15', 'Encoding settings'), ('16', 'Open saved reports'),
+ITEMS = [('15', 'Preferred quality profile'), ('16', 'Open saved reports'),
          ('17', 'Build encoding list from Stash'), ('18', 'Compare duplicate scene files'),
          ('19', 'Retry Whisparr Sync for one scene'), ('20', 'View move and encode history'),
          ('21', 'Undo a recorded move / primary change'), ('22', 'Review finished encodes'),
@@ -42,10 +42,12 @@ def text_report(o, name, text):
 
 
 def settings_menu(o, settings):
-    target = encoding.config(settings.get('encoding'))
+    target = encoding.profile(settings)
     for key, label in [('width', 'Maximum width'), ('height', 'Maximum height'),
                        ('video_kbps', 'Average video bitrate (kbps)'), ('min_video_kbps', 'Minimum source video bitrate (kbps)'),
-                       ('audio_kbps', 'AAC fallback bitrate (kbps)')]:
+                       ('audio_kbps', 'AAC fallback bitrate (kbps)'),
+                       ('min_savings_mib', 'Minimum estimated savings (MiB; 0 disables)'),
+                       ('min_savings_percent', 'Minimum estimated reduction (%; 0 disables)')]:
         if key == 'min_video_kbps':
             target[key] = max(target[key], target['video_kbps'] + 1000)
         value = o.prompt(label, str(target[key]))
@@ -56,9 +58,10 @@ def settings_menu(o, settings):
     print('Encoders: auto, vt_h265_10bit (Apple hardware), x265_10bit (software)')
     target['encoder'] = o.prompt('Encoder', target['encoder'])
     target = encoding.config(target)
-    result = dict(settings, encoding=target)
+    result = dict(settings, preferred_quality=target)
+    result.pop('encoding', None)
     o.save_document(o.CONFIG_FILE, result)
-    print('Encoding settings saved. Build a new list to use them. H.265 10-bit / MKV; originals kept.')
+    print('Preferred quality saved. Rebuild lists and duplicate recommendations to use it. H.265 10-bit / MKV; originals kept.')
     return result
 
 
@@ -146,7 +149,10 @@ def build_stash_list(o, settings):
     choices = {'1': [o.INCOMING_ROOT], '2': [o.MEDIA_ROOT], '3': [o.INCOMING_ROOT, o.MEDIA_ROOT]}
     if scope not in choices:
         raise RuntimeError('Choose 1, 2 or 3.')
-    document = stash_candidates(o, o.API(settings), encoding.config(settings.get('encoding')), choices[scope])
+    document = stash_candidates(o, o.API(settings), encoding.profile(settings), choices[scope])
+    document = encoding.apply_savings_limits(document)
+    import duplicate_review
+    duplicate_review.suppress_redundant_encodes(o, document, settings)
     o.save_document(o.ENCODING_FILE, document)
     encoding.write_csv(o.ENCODING_CSV, document)
     lines = ['STASH ENCODING CANDIDATES', '', 'HDR and current source details will be verified before encoding.',
@@ -248,12 +254,13 @@ def show_history(o):
     moves = journal.latest(move_history_path(o))
     encodes = journal.latest(o.REPORTS_DIR / 'encode-history.jsonl')
     lines = ['ORGANIZER HISTORY', '', 'History begins with actions performed by this version.', '']
-    for event in moves + encodes:
+    duplicates = journal.latest(o.REPORTS_DIR / 'duplicate-history.jsonl')
+    for event in moves + encodes + duplicates:
         lines.append('{} | {} | {} | {}'.format(event.get('time', ''), event['id'], event['kind'], event['status']))
         job = event.get('job', {})
         lines.append('  {} -> {}'.format(event.get('source', job.get('source', '')), event.get('target', job.get('output', ''))))
     path = text_report(o, 'action-history.txt', '\n'.join(lines) + '\n')
-    print('{} recorded actions; {} finished encodes. Report: {}'.format(len(moves), len(encodes), path))
+    print('{} recorded actions; {} finished encodes. Report: {}'.format(len(moves) + len(duplicates), len(encodes), path))
     for event in moves[-15:]:
         print('{}  {}  {}'.format(event['id'][:10], event['kind'], event['status']))
 

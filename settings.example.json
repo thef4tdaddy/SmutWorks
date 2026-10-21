@@ -7,18 +7,27 @@
   "media_relative": "library/scenes",
   "stash_root": "/data",
   "stash_aliases": [],
-  "performer_genders": ["*"],
+  "performer_genders": [
+    "*"
+  ],
   "unlinked_subfolder": "unlinked",
   "tag_prefix": "SmutWorks",
   "delegate_stashdb": true,
   "performer_search_depth": 6,
-  "encoding": {
+  "preferred_quality": {
     "width": 1920,
     "height": 1080,
     "video_kbps": 5000,
     "audio_kbps": 160,
     "audio_mode": "copy-first-with-aac-fallback",
     "encoder": "auto",
-    "min_video_kbps": 6500
+    "min_video_kbps": 6500,
+    "min_savings_mib": 0,
+    "min_savings_percent": 0
+  },
+  "duplicates": {
+    "mode": "preferred",
+    "phash_distance": 0,
+    "duration_diff": 2
   }
 }

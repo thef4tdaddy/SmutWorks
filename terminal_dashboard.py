@@ -173,7 +173,7 @@ def run(task, items, selected, status=''):
                 selected_index = next((i for i, item in enumerate(items) if item[0] == selected), 0)
                 start = max(0, selected_index - body_rows + 1)
                 for offset, (number, label) in enumerate(items[start:start + body_rows]):
-                    write(body_top + offset, 2, '{} {:>2} {}'.format('>' if number == selected else ' ', number, label).ljust(x - 5),
+                    write(body_top + offset, 2, '{} {:>2} {}'.format('>' if number == selected else ' ', start + offset + 1, label).ljust(x - 5),
                           highlight if number == selected else curses.A_DIM, x - 5)
                 for y in range(4, height - 4):
                     try:

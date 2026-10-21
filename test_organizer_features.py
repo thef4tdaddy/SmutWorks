@@ -48,10 +48,10 @@ class FeatureTests(unittest.TestCase):
 
     def test_saved_settings_preserve_connection_and_are_validated(self):
         settings = {'stash_url': 'http://example.invalid', 'api_key': 'private', 'share_root': str(self.base)}
-        with patch.object(o, 'prompt', side_effect=['1280', '720', '3000', '4500', '128', 'x265_10bit']):
+        with patch.object(o, 'prompt', side_effect=['1280', '720', '3000', '4500', '128', '0', '0', 'x265_10bit']):
             result = f.settings_menu(o, settings)
         self.assertEqual(result['api_key'], settings['api_key'])
-        self.assertEqual(result['encoding']['height'], 720)
+        self.assertEqual(result['preferred_quality']['height'], 720)
         self.assertEqual(json.loads(o.CONFIG_FILE.read_text()), result)
         self.assertRaises(RuntimeError, q.config, {'video_kbps': 9000, 'min_video_kbps': 6500})
 

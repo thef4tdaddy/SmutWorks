@@ -56,3 +56,11 @@ Settings without `settings_version` are treated as the earlier organizer format.
 ## Platform scope
 
 macOS is the supported platform in this alpha. Terminal UI, clipboard integration, report opening, and AAC fallback are built around macOS. This update makes installations configurable; it does not claim Windows or Linux support.
+
+## Preferred quality and duplicate settings
+
+The `preferred_quality` object is the single profile for discovery, encoding, and duplicate recommendations. Earlier `encoding` settings are accepted and normalized to this profile without changing saved queues. The current codec is HEVC 10-bit; resolution, video bitrate, AAC fallback bitrate, source bitrate threshold, encoder, and minimum estimated savings are editable under **Settings & History → Preferred quality profile**.
+
+`min_savings_mib` and `min_savings_percent` default to 0 (disabled). Both thresholds must pass if both are enabled. There is no separate close-enough tolerance; estimated savings and the existing minimum source bitrate determine which conversions are worthwhile.
+
+`duplicates` configures the default recommendation `mode` (`quality`, `preferred`, `smallest`, or `manual`), perceptual `phash_distance` (0–32), and `duration_diff` (0–60 seconds, default 2). These can be changed under **Duplicates → Duplicate review settings**. See [duplicate review](duplicates.md).

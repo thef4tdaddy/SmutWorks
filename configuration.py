@@ -62,4 +62,7 @@ def normalize(settings):
         raise RuntimeError('delegate_stashdb must be true or false.')
     result['delegate_stashdb'] = delegate
     result['performer_search_depth'] = depth
+    from encoding_queue import profile
+    result['preferred_quality'] = profile(settings)
+    result.pop('encoding', None)
     return result
