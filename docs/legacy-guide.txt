@@ -1,0 +1,204 @@
+ADULT CONTENT ORGANIZER 0.9.0 — MAC TERMINAL APP
+
+QUICK START / UPDATE
+Unzip to a writable folder you will keep, such as Documents. Replace ALL
+app files when updating, including the new organizer_features.py and
+organizer_journal.py. Keep the app's five Python modules together.
+Double-click Start Organizer.command, or type python3 plus a space in
+Terminal, drag adult_content_organizer.py into it, and press Return.
+Requires Python 3.8+; standard library only. ffprobe and HandBrakeCLI are
+needed for encoding/review, not for metadata-only Stash cleanup checks.
+
+Up/Down selects actions, Enter opens them, Q exits the menu. A wider window
+shows the action descriptions/output pane. Tasks and prompts stay in that
+pane. The menu pauses while a task runs. PgUp/PgDn scroll; Enter returns
+when finished. C copies recent output after completion. Ctrl-C requests
+stopping; in-flight NAS/API work must finish or time out first. A Stash job
+may keep running after you stop monitoring: check its job ID before retrying.
+
+CONNECTION / FILES
+Mount Secondary Storage in Finder first. Menu 1 defaults:
+  Stash URL: http://192.168.1.221:9999
+  Mounted share: /Volumes/Secondary Storage
+  Incoming relative path: SeedboxSync/xxx
+  Organized relative path: sex/media/scenes
+No quotes around paths in prompts. An API key can be entered hidden.
+Saved settings/cache live privately in:
+  ~/Library/Application Support/Adult Content Organizer/
+Connection changes preserve saved encoding preferences.
+Reports and action history live in reports/ beside the app. Your API key is
+not written to reports. Existing connection settings survive app updates.
+The /media and /incoming container mounts are assumed to map to the same
+Secondary Storage share, matching your current Docker configuration.
+
+MENU REFERENCE
+ 1  Connection and folder settings
+ 2  Test Stash connection and NAS folders
+ 3  Preview file organization (summary + full text report)
+ 4  Move media from the saved preview using native Stash moveFiles
+ 5  Preview missing-metadata flags
+ 6  Apply missing-metadata flags
+ 7  Preview empty folders and image/small-file leftovers in BOTH roots
+13  Collect previewed images into each root's leftover images folder
+ 8  Remove only previewed folders that are still empty
+14  Run your Stash cleanup filters plus StashDB incoming/sync review
+ 9  View saved reports in the output pane
+10  Build an encoding list by scanning files (metadata cache is reused)
+12  Copy a command for the saved encoding list directly to the clipboard
+11  Run the saved list through HandBrakeCLI inside the app
+15  Edit encoding settings
+16  Open the reports folder in Finder / a text report in TextEdit
+17  Build an encoding list from Stash metadata
+18  Compare multiple files attached to scenes
+19  Retry Whisparr Sync for ONE selected pending scene
+20  Review recorded action and encode history
+21  Undo one completed move or primary-file change
+22  Review finished encodes recorded by the app
+23  Make one reviewed encode the primary file of its existing Stash scene
+ 0  Exit
+
+ORGANIZATION
+Non-StashDB incoming scenes need a title and a named female performer.
+Manual metadata and other providers including PornDB/FanDB are accepted.
+The alphabetically first female performer determines the folder. Existing
+nested performer folders are reused; ambiguous matches are skipped.
+Destination: <performer>/not on stash/<original filename>.
+StashDB-linked scenes stay with Whisparr Sync.
+
+Preview reports counts in the pane; all filenames, missing metadata,
+proposed destinations and blockers go to organization-preview.txt. The
+JSON plan is retained for applying moves. Files must be indexed in Stash
+for organization. Applying rechecks current metadata, paths and conflicts.
+A timeout stops the list; check Stash before retrying a possibly active move.
+
+Metadata flags managed by the app:
+  ACO - Needs metadata
+  ACO - Needs title
+  ACO - Needs female performer
+Existing user tags are preserved; resolved managed flags are removed.
+
+FOLDER CLEANUP
+Menu 7 checks incoming AND organized media recursively. It reports empty
+folders (including parents containing only empty children) and folders
+containing only images/small non-video files. Other non-video files count
+up to 10 MiB each. Common images count at any size: JPG, PNG, WebP, GIF,
+BMP, TIFF, AVIF, HEIC. A small video is never treated as a leftover.
+
+Menu 13 moves only previewed images to:
+  <incoming root>/leftover images/<original relative folder>/<filename>
+  <organized root>/leftover images/<original relative folder>/<filename>
+Subfolder paths are preserved. Existing destinations and changed files are
+skipped. NFO/subtitle/other small files stay put. Both collection folders,
+hidden/sync paths and symlinks are excluded from scans. No leftover file
+is deleted. Run 7 again after collection, then 8 for newly empty folders.
+Both configured roots are always preserved.
+
+STASH CLEANUP CHECKS / DUPLICATE COMPARISON
+Menu 14 uses Stash native API filters:
+  file_count GREATER_THAN 1
+  resolution GREATER_THAN FULL_HD (1080p)
+  video_codec NOT_EQUALS hevc
+It also finds nonempty StashDB IDs with files still in incoming/sync.
+PornDB/FanDB-only scenes are excluded from sync review; scenes with both
+StashDB and other IDs are included. A pending sync is not proof of failure.
+These checks use recorded Stash metadata, without inspecting videos or
+walking the NAS. Counts are scenes; a scene can match multiple checks.
+Menu 18 adds a readable comparison of codec, resolution, duration, size and
+bitrate for multiple-file scenes. It never chooses/deletes a duplicate.
+
+WHISPARR SYNC RETRY
+Menu 19 discovers the enabled Whisparr Sync plugin and lets you choose one
+pending StashDB scene. It sends the single-scene hookContext ID through
+runPluginTask, never the bulk mode. Type SYNC to apply. Job status/progress
+is shown, followed by a path check and a report. Whisparr Sync uses its own
+existing settings and can move files. A finished job can still leave files
+in incoming; inspect its logs in that case. Leave active sync jobs alone.
+This payload was checked against the upstream beetanz/whisparr-sync plugin;
+a different installed fork may require adjustment.
+
+ENCODING SETTINGS / LISTS
+Defaults: H.265 10-bit, max 1920x1080, average video bitrate 5000 kbps,
+minimum source video bitrate 6500 kbps, MKV, no upscaling/cropping, variable
+frame rate preserving source timing. First audio track passthrough with
+AAC160 stereo fallback. Other audio and subtitle tracks are not selected.
+
+Menu 15 edits width/height limits, video bitrate, minimum source bitrate,
+audio fallback bitrate, and encoder: auto / vt_h265_10bit / x265_10bit.
+Auto chooses Apple hardware when advertised by HandBrakeCLI, otherwise
+software x265. An explicitly requested unavailable encoder stops with an
+error. Lowering bitrate costs image quality: review a sample first.
+New lists snapshot settings; later preference edits do not alter a saved list.
+
+Menu 10 recursively probes videos with ffprobe. Metadata is cached locally
+when path, size, modification time and change time are unchanged. Fresh
+probes checkpoint every 25 files and at completion/interruption. Corrupt
+cache data falls back to fresh inspection. Delete video-probe-cache.json
+beside settings to force fresh probes; this does not delete settings.
+
+Menu 17 asks Stash to narrow candidates by recorded bitrate, applies the
+current per-file rules to the returned metadata, and checks only candidate
+paths. It does not probe video contents or walk library folders. Each source
+is freshly probed just before encoding; HDR/unknown details/insufficient
+bitrate are skipped then. Recorded Stash bitrate is an estimate for selection.
+
+Files changed in the last 10 minutes, existing reencoded outputs, protected
+paths, symlinks, output-name collisions, HDR and near/below-target bitrates
+are skipped. Originals with the same stem but different extensions that
+would use the same output name are skipped as conflicts.
+
+OUTPUT / RESUME
+Output sits beside the source as <original stem> - reencoded.mkv.
+Original files are always kept. Sequential encoding limits memory/IO load.
+Use 11 in the pane, or 12 to copy a command for another Terminal window.
+Keep the extracted scripts in place and the NAS mounted. Avoid moving the
+selected sources while an external encoding command is running.
+Re-running skips completed output files. A failed job retains a hidden
+.aco-partial-* file and stops. Retrying starts that job again, not mid-encode.
+Codec/duration checks run before finalizing outputs. Successful encodes are
+recorded in reports/encode-history.jsonl for review across future lists.
+
+FINISHED-ENCODE REVIEW / PRIMARY FILE
+Menu 22 compares recorded sources/outputs: size, savings, duration, HEVC
+codec and requested dimensions, with fresh fingerprints and probes. This
+is basic integrity checking, not a visual quality guarantee.
+Menu 23 lets you choose a reviewed output and type PROMOTE. It rechecks
+files, locates the original scene, and scans only that output if necessary.
+If the output already belongs to the original scene, it can become primary.
+If it belongs to a separate bare scan-created scene with only its filename
+as title and no user metadata/history, that scene can be merged into the
+original using Stash's native API before switching the primary file.
+Rich or ambiguous output scenes are left for manual merge/review in Stash.
+
+Original media remains attached, so the scene can have multiple files.
+Switching primary preserves the original scene and does not free disk space
+by deleting the source. Existing Stash update hooks, including Whisparr Sync,
+may run. Unexpected paths/content after hooks stop the action for review.
+
+MOVE HISTORY / UNDO
+History starts with this version; older actions cannot be automatically
+reconstructed. Media moves use native Stash APIs; image moves use exclusive
+local renames. Pending entries are written before changes; completed entries
+follow verification. Undo requires a completed action with unchanged files
+and an unoccupied old location. Media undo also checks/updates Stash paths.
+Primary-file undo restores the previous primary choice, keeping both files.
+A merged bare output scene is not recreated by primary undo.
+Pending/interrupted records require manual review rather than a blind retry.
+No action permanently deletes original videos.
+
+REPORTS
+organization-preview.txt/.json
+cleanup-preview.json / cleanup-results.json / image-move-results.json
+stash-cleanup-checks.txt/.json / duplicate-comparison.txt
+encoding-candidates.txt / encoding-list.csv / encoding-preview.json
+encode-review.txt/.json / action-history.txt / whisparr-sync-retry.txt
+move-history.jsonl / encode-history.jsonl
+
+VALIDATION / LIMITS
+78 local tests cover existing workflows and new settings, Stash candidates,
+read-only comparison, scoped plugin payloads, conflict-safe undo, primary
+switch/undo, metadata guards, source reinspection and encoder availability.
+A generated-video encode with custom settings, completion history and review
+was also checked. New Stash mutations have not been run on your NAS from
+this execution environment; the saved connection was unreachable here.
+Public API shapes and plugin payload were checked against upstream source.
+App menu 2 checks your running Stash connection and file-move support.
