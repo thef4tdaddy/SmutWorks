@@ -41,6 +41,45 @@ def summary(target=None):
         value['width'], value['height'], value['video_kbps'], value['encoder'], value['audio_kbps'])
 
 
+def rank_jobs(jobs, target=None):
+    """Estimate bytes saved, retaining non-video bytes as a conservative audio allowance."""
+    target = config(target)
+    ranked = []
+    for original in jobs:
+        job = dict(original)
+        duration = float(job.get('duration') or 0)
+        size = int(job.get('size') or 0)
+        rate = float(job.get('video_kbps') or 0)
+        if duration > 0 and math.isfinite(duration) and size > 0 and rate > 0:
+            # Audio is copied when supported. Keep the source's entire non-video
+            # allowance, at least the configured fallback audio, plus 1% overhead.
+            audio_bytes = max(size - duration * rate * 125,
+                              duration * target['audio_kbps'] * 125)
+            estimated = int((duration * target['video_kbps'] * 125 + audio_bytes) * 1.01)
+            saved = max(0, size - estimated)
+            job.update(estimated_output_bytes=estimated, estimated_savings_bytes=saved,
+                       estimated_savings_percent=round(100 * saved / size, 1))
+        else:
+            job.update(estimated_output_bytes=None, estimated_savings_bytes=None,
+                       estimated_savings_percent=None)
+        ranked.append(job)
+    return sorted(ranked, key=lambda j: (-(j['estimated_savings_bytes']
+                  if j['estimated_savings_bytes'] is not None else -1), j.get('source', '').casefold()))
+
+
+def savings_label(job):
+    saved = job.get('estimated_savings_bytes')
+    return ('estimated savings unknown' if saved is None else
+            '~{:.2f} GiB ({:.1f}%) smaller'.format(saved / 1024**3, job['estimated_savings_percent']))
+
+
+def encoding_status(**values):
+    import sys
+    update = getattr(sys.stdout, 'set_encoding_status', None)
+    if update:
+        update(**values)
+
+
 def inside(path, root):
     try:
         path.relative_to(root)
@@ -171,16 +210,19 @@ def scan(root, protected, cache=None, checkpoint=None, target=None):
     counts = collections.Counter(j['output'].casefold() for j in jobs)
     clean = [j for j in jobs if counts[j['output'].casefold()] == 1]
     skipped['output-name collision'] += len(jobs) - len(clean)
-    return {'version': 1, 'root': str(root), 'target': target_config, 'jobs': clean, 'skipped': dict(skipped), 'scan_stats': {'cached': reused, 'probed': probed}}
+    return {'version': 1, 'root': str(root), 'target': target_config, 'jobs': rank_jobs(clean, target_config), 'skipped': dict(skipped), 'scan_stats': {'cached': reused, 'probed': probed}}
 
 
 def write_csv(path, document):
     with Path(path).open('w', newline='') as output:
         writer = csv.writer(output)
-        writer.writerow(['Source', 'Output', 'Resolution', 'Codec', 'Approx video kbps', 'Reason'])
+        writer.writerow(['Source', 'Output', 'Resolution', 'Codec', 'Approx video kbps', 'Reason', 'Estimated output GiB', 'Estimated savings GiB', 'Estimated reduction %'])
         for job in document['jobs']:
             writer.writerow([job['source'], job['output'], '{}x{}'.format(job['width'], job['height']),
-                             job['codec'], job['video_kbps'], job['reason']])
+                             job['codec'], job['video_kbps'], job['reason'],
+                             job.get('estimated_output_bytes', 0) / 1024**3 if job.get('estimated_output_bytes') is not None else '',
+                             job.get('estimated_savings_bytes', 0) / 1024**3 if job.get('estimated_savings_bytes') is not None else '',
+                             job.get('estimated_savings_percent', '')])
     Path(path).chmod(0o600)
 
 
@@ -247,7 +289,9 @@ def _run(document, journal_path=None):
     encoder = encoder_for(handbrake, target_settings['encoder'])
     print('Encoder:', encoder, '(software encoding)' if encoder == 'x265_10bit' else '(Apple hardware)')
     completed, skipped = 0, 0
-    for job in document['jobs']:
+    for position, job in enumerate(rank_jobs(document['jobs'], target_settings), 1):
+        encoding_status(filename=Path(job['source']).name, position=position, total=len(document['jobs']),
+                        stage='Checking source', progress='')
         source, target = Path(job['source']), Path(job['output'])
         try:
             source.resolve().relative_to(root.resolve())
@@ -277,10 +321,12 @@ def _run(document, journal_path=None):
         fd, partial = tempfile.mkstemp(prefix='.' + source.stem[:60] + '.aco-partial-', suffix='.mkv', dir=str(source.parent))
         os.close(fd)
         print('ENCODING:', source, flush=True)
+        encoding_status(stage='Encoding')
         try:
             result = execute_encode(command(handbrake, encoder, source, partial, target_settings))
             if result.returncode:
                 raise RuntimeError('HandBrake stopped; partial output retained at ' + partial)
+            encoding_status(stage='Verifying output', progress='')
             output_info = details(probe(partial))
             after = source.stat()
             if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
@@ -297,9 +343,11 @@ def _run(document, journal_path=None):
                     'source_fingerprint': organizer_journal.fingerprint(source),
                     'output_fingerprint': organizer_journal.fingerprint(target)})
             completed += 1
+            encoding_status(stage='Finished', completed=completed)
             print('FINISHED:', target)
         except KeyboardInterrupt:
             raise RuntimeError('Encoding interrupted; original untouched, partial output at ' + partial) from None
+    encoding_status(stage='Queue finished', progress='', completed=completed)
     return '{} encoded; {} stale/conflicting entries skipped. Originals kept.'.format(completed, skipped)
 
 
@@ -312,7 +360,7 @@ def queue_command(queue_path):
 if __name__ == '__main__':
     import argparse
     import fcntl
-    parser = argparse.ArgumentParser(description='Run a reviewed Adult Content Organizer encoding list.')
+    parser = argparse.ArgumentParser(description='Run a reviewed SmutWorks encoding list.')
     parser.add_argument('--queue', required=True, type=Path)
     args = parser.parse_args()
     os.umask(0o077)

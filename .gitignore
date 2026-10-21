@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SmutWorks private runtime data
+reports/
+settings.json
+video-probe-cache.json
+*.jsonl
+*.lock
+.DS_Store

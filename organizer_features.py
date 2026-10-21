@@ -136,7 +136,7 @@ def stash_candidates(o, api, target, roots):
         else:
             skip('output-name collision')
     return {'version': 1, 'root': str(o.SHARE_ROOT.resolve()), 'roots': [str(root.resolve()) for root in roots],
-        'target': target, 'jobs': clean, 'skipped': skipped, 'origin': 'stash',
+        'target': target, 'jobs': encoding.rank_jobs(clean, target), 'skipped': skipped, 'origin': 'stash',
         'scan_stats': {'cached': 0, 'probed': 0}}
 
 
@@ -150,9 +150,10 @@ def build_stash_list(o, settings):
     o.save_document(o.ENCODING_FILE, document)
     encoding.write_csv(o.ENCODING_CSV, document)
     lines = ['STASH ENCODING CANDIDATES', '', 'HDR and current source details will be verified before encoding.',
+             'Order: largest estimated GiB saved first (estimates, not guaranteed).',
              'Settings: ' + encoding.summary(document['target']), 'Skipped: ' + json.dumps(document['skipped']), '']
     for job in document['jobs']:
-        lines.extend([job['source'], '  Output: ' + job['output'],
+        lines.extend([job['source'], '  Output: ' + job['output'], '  ' + encoding.savings_label(job),
                       '  {}x{} | {} | ~{} kbps'.format(job['width'], job['height'], job['codec'], job['video_kbps'])])
     report = text_report(o, 'encoding-candidates.txt', '\n'.join(lines) + '\n')
     print('{} files queued for review; no video probing or folder walk. Nothing encoded.'.format(len(document['jobs'])))

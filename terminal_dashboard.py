@@ -22,6 +22,9 @@ class TaskConsole(io.TextIOBase):
         self.cancelled = threading.Event()
         self.pending = ''
 
+    def set_encoding_status(self, **values):
+        self.events.put(('encoding_status', values))
+
     def writable(self):
         return True
 
@@ -35,6 +38,8 @@ class TaskConsole(io.TextIOBase):
         self.pending += str(text).replace('\r', '\n')
         while '\n' in self.pending:
             line, self.pending = self.pending.split('\n', 1)
+            if re.search(r'Encoding: task .*?\d+(?:\.\d+)?\s*%', line):
+                self.set_encoding_status(progress=line[line.index('Encoding:'):], stage='Encoding')
             self.events.put(('line', line))
         return len(text)
 
@@ -66,15 +71,31 @@ def worker(console, task, outcome):
             outcome['result'] = task()
     except (KeyboardInterrupt, EOFError):
         outcome['cancelled'] = True
+        console.set_encoding_status(stage='Stopped')
         console.events.put(('line', 'Task stopped. If a file move was in progress, check its location before retrying.'))
     except Exception as error:
         outcome['error'] = True
+        console.set_encoding_status(stage='Stopped: check log')
         message = str(error) if isinstance(error, RuntimeError) else type(error).__name__
         console.events.put(('line', 'Action stopped: ' + message))
     finally:
         builtins.input, getpass.getpass = old_input, old_getpass
         console.flush()
         console.events.put(('done', None))
+
+
+def encoding_header(status, width):
+    """Pinned lines are rendered separately from scrollback, including on errors."""
+    filename = ' '.join(str(status.get('filename', '')).split())
+    lines = textwrap.wrap('File {}/{}: {}'.format(status.get('position', '?'),
+                          status.get('total', '?'), filename), max(8, width))
+    # Keep a very long filename from consuming the whole pane.
+    lines = lines[:2]
+    lines.append('Stage: {} | Completed: {}'.format(status.get('stage', ''), status.get('completed', 0)))
+    if status.get('progress'):
+        progress = re.sub(r'^Encoding: task \d+ of \d+,\s*', '', status['progress'])
+        lines.extend(textwrap.wrap(progress, max(8, width))[:2])
+    return lines
 
 
 def run(task, items, selected, status=''):
@@ -108,6 +129,7 @@ def run(task, items, selected, status=''):
             highlight = curses.color_pair(2) | curses.A_BOLD
         lines = collections.deque(maxlen=4000)
         done, question, answer, scroll = False, None, '', 0
+        encoding = {}
         revision = 0
         wrap_key, wrapped = None, []
         thread.start()
@@ -120,6 +142,8 @@ def run(task, items, selected, status=''):
                 if event == 'line':
                     lines.append(value)
                     revision += 1
+                elif event == 'encoding_status':
+                    encoding.update(value)
                 elif event == 'prompt':
                     question, answer = value, ''
                 elif event == 'done':
@@ -137,7 +161,7 @@ def run(task, items, selected, status=''):
                         window.addnstr(y, x, text, count, style)
                     except curses.error:
                         pass
-            write(1, 2, 'ADULT CONTENT ORGANIZER', accent)
+            write(1, 2, 'SMUTWORKS', accent)
             state = 'STOPPING...' if console.cancelled.is_set() and not done else (('STOPPED' if outcome.get('error') or outcome.get('cancelled') else 'FINISHED') if done else 'WORKING...')
             write(2, 2, status, curses.A_DIM)
             split = width >= 80 and height >= 15
@@ -166,10 +190,20 @@ def run(task, items, selected, status=''):
                     line = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', line).expandtabs(4)
                     wrapped.extend(textwrap.wrap(line, available, replace_whitespace=False) or [''])
                 wrap_key = (revision, available)
+            log_top = body_top
+            log_rows = body_rows
+            if encoding.get('filename'):
+                pinned = encoding_header(encoding, available)
+                # Reserve log space even on smaller terminals.
+                pinned = pinned[:max(1, body_rows - 2)]
+                for offset, line in enumerate(pinned):
+                    write(body_top + offset, x, line, accent)
+                log_top += len(pinned) + 1
+                log_rows = max(1, body_rows - len(pinned) - 1)
             end = max(0, len(wrapped) - scroll)
-            start = max(0, end - body_rows)
+            start = max(0, end - log_rows)
             for offset, line in enumerate(wrapped[start:end]):
-                write(body_top + offset, x, line)
+                write(log_top + offset, x, line)
             if question:
                 prompt, hidden = question
                 write(height - 4, x, prompt, accent)

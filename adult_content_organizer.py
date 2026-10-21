@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adult Content Organizer: Stash-driven organization and incoming-folder cleanup."""
+"""SmutWorks: Stash-driven organization and incoming-folder cleanup."""
 import collections
 import getpass
 import organizer_journal
@@ -16,11 +16,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SHARE_ROOT = Path('/Volumes/Secondary Storage')
-MEDIA_ROOT = SHARE_ROOT / 'sex/media/scenes'
-INCOMING_ROOT = SHARE_ROOT / 'SeedboxSync/xxx'
-APP_VERSION = '0.9.0'
-STATE_DIR = Path.home() / 'Library/Application Support/Adult Content Organizer'
+SHARE_ROOT = Path('/Volumes/Media')
+MEDIA_ROOT = SHARE_ROOT / 'media/scenes'
+INCOMING_ROOT = SHARE_ROOT / 'incoming'
+APP_VERSION = '0.1.0-alpha.1'
+# Reuse an existing installation's private state without moving or losing settings.
+LEGACY_STATE_DIR = Path.home() / 'Library/Application Support/Adult Content Organizer'
+STATE_DIR = (LEGACY_STATE_DIR if (LEGACY_STATE_DIR / 'settings.json').is_file() else
+             Path.home() / 'Library/Application Support/SmutWorks')
 CONFIG_FILE = STATE_DIR / 'settings.json'
 PROBE_CACHE_FILE = STATE_DIR / 'video-probe-cache.json'
 REPORTS_DIR = Path(__file__).resolve().parent / 'reports'
@@ -375,7 +378,7 @@ def organization_report(plan, details, supported):
     other = [entry for entry in details if not entry.get('missing') and entry['reason'] != 'has-stashdb']
     delegated = [entry for entry in details if entry['reason'] == 'has-stashdb']
     report = PLAN_FILE.with_suffix('.txt')
-    lines = ['ADULT CONTENT ORGANIZER - ORGANIZATION PREVIEW', '',
+    lines = ['SMUTWORKS - ORGANIZATION PREVIEW', '',
         'Incoming: ' + str(INCOMING_ROOT), 'Organized root: ' + str(MEDIA_ROOT), '',
         '{} files can be organized.'.format(len(plan)),
         '{} files need metadata edits before they can be moved.'.format(len(missing)),
@@ -479,7 +482,7 @@ def stash_cleanup_report(api):
         '{} scenes match resolution greater than 1080p.'.format(counts['above_1080p']),
         '{} scenes match video codec is not HEVC.'.format(counts['not_hevc']),
         '{} StashDB-linked scenes still in incoming/sync need review.'.format(counts['stashdb_incoming'])]
-    lines = ['ADULT CONTENT ORGANIZER - STASH CLEANUP CHECKS', '',
+    lines = ['SMUTWORKS - STASH CLEANUP CHECKS', '',
         'Scope: first three checks use native Stash filters across the library.',
         'StashDB sync review is limited to incoming. A pending sync is not a confirmed error.',
         'Scenes can appear in more than one section. All attached files are listed.',
@@ -774,15 +777,15 @@ def configure(old=None):
     old = old or {}
     print('\nStash connection and NAS folders')
     print('Use the folder mounted in Finder, not the NAS /volume2 path.')
-    url = prompt('Stash URL', old.get('stash_url', 'http://192.168.1.221:9999'))
+    url = prompt('Stash URL', old.get('stash_url', 'http://localhost:9999'))
     parts = urllib.parse.urlsplit(url)
     if parts.scheme not in ('http', 'https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
         raise RuntimeError('Use an http(s) URL without embedded credentials, query or fragment.')
     key = getpass.getpass('Stash API key (hidden; Enter keeps the saved key): ')
     settings = {'stash_url': url, 'api_key': key or old.get('api_key', ''),
-        'share_root': prompt('Mounted NAS share', old.get('share_root', '/Volumes/Secondary Storage')),
-        'incoming_relative': prompt('Incoming folder inside share', old.get('incoming_relative', 'SeedboxSync/xxx')),
-        'media_relative': prompt('Organized root inside share', old.get('media_relative', 'sex/media/scenes'))}
+        'share_root': prompt('Mounted NAS share', old.get('share_root', '/Volumes/Media')),
+        'incoming_relative': prompt('Incoming folder inside share', old.get('incoming_relative', 'incoming')),
+        'media_relative': prompt('Organized root inside share', old.get('media_relative', 'media/scenes'))}
     if old.get('encoding'):
         settings['encoding'] = old['encoding']
     set_paths(settings)
@@ -803,7 +806,7 @@ def connection_test(settings):
 
 
 MENU = '''
-Adult Content Organizer
+SmutWorks
 
   1  Connection and folder settings
   2  Test Stash connection and NAS folders
@@ -846,13 +849,13 @@ MENU_DESCRIPTIONS = {
     '10': ('HANDBRAKE / PREVIEW', 'Choose incoming or organized media and build a reviewed encoding list. Target: up to 1080p H.265 10-bit at 5000 kbps. No encoding starts.'),
     '12': ('HANDBRAKE / COMMAND', 'Print one copy-and-paste command for the saved encoding list. Run it in another Terminal window to see HandBrake progress.'),
     '11': ('HANDBRAKE / ENCODE', 'Encode the saved list on this Mac. Requires typing ENCODE before starting. Outputs stay beside their originals as - reencoded.mkv. Originals are kept.'),
-    '0': ('EXIT', 'Close Adult Content Organizer. Saved settings and reports remain available next time.')}
+    '0': ('EXIT', 'Close SmutWorks. Saved settings and reports remain available next time.')}
 
 
 import organizer_features
 MENU_ITEMS[-1:-1] = organizer_features.ITEMS
 MENU_DESCRIPTIONS.update(organizer_features.DESCRIPTIONS)
-MENU = '\nAdult Content Organizer\n\n' + '\n'.join(' {:>2}  {}'.format(*item) for item in MENU_ITEMS) + '\n'
+MENU = '\nSmutWorks\n\n' + '\n'.join(' {:>2}  {}'.format(*item) for item in MENU_ITEMS) + '\n'
 
 
 def menu_selection(current, key, typed=''):
@@ -923,12 +926,12 @@ def choose_menu(settings, previous='1'):
                     except curses.error:
                         pass
             if height < 14 or width < 45:
-                write(0, 0, 'Adult Content Organizer', accent)
+                write(0, 0, 'SmutWorks', accent)
                 write(2, 0, 'Enlarge Terminal for the full menu.')
                 write(4, 0, MENU_ITEMS[current][1], selected)
                 write(6, 0, 'Up/Down: move | Enter: select | Q: exit')
             else:
-                write(1, 2, 'ADULT CONTENT ORGANIZER  ' + APP_VERSION, accent)
+                write(1, 2, 'SMUTWORKS  ' + APP_VERSION, accent)
                 write(2, 2, 'Stash library tools  /  Cleanup  /  HandBrake', curses.A_DIM)
                 configured = settings is not None
                 mounted = configured and SHARE_ROOT.is_dir()
@@ -1032,8 +1035,9 @@ def perform_choice(choice, settings):
         save_document(ENCODING_FILE, document)
         encoding_queue.write_csv(ENCODING_CSV, document)
         for job in document['jobs'][:100]:
-            print('CANDIDATE: {} ({}x{}, {}, ~{} kbps)'.format(job['source'], job['width'], job['height'], job['codec'], job['video_kbps']))
+            print('CANDIDATE: {} ({})'.format(job['source'], encoding_queue.savings_label(job)))
         print('{} candidates; skipped: {}'.format(len(document['jobs']), document['skipped']))
+        print('Order: largest estimated GiB saved first. Estimates include an audio allowance.')
         print('List:', ENCODING_CSV)
         print('Target settings:', encoding_queue.summary(document['target']))
         print('No encoding started. Originals will be kept.')
@@ -1068,7 +1072,7 @@ def main():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print('Adult Content Organizer is already open in another terminal.')
+            print('SmutWorks is already open in another terminal.')
             return 1
         settings = None
         if CONFIG_FILE.exists():

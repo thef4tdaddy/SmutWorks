@@ -1,4 +1,4 @@
-ADULT CONTENT ORGANIZER 0.9.0 — MAC TERMINAL APP
+SMUTWORKS — LEGACY FEATURE GUIDE — MAC TERMINAL APP
 
 QUICK START / UPDATE
 Unzip to a writable folder you will keep, such as Documents. Replace ALL
@@ -17,19 +17,19 @@ stopping; in-flight NAS/API work must finish or time out first. A Stash job
 may keep running after you stop monitoring: check its job ID before retrying.
 
 CONNECTION / FILES
-Mount Secondary Storage in Finder first. Menu 1 defaults:
-  Stash URL: http://192.168.1.221:9999
-  Mounted share: /Volumes/Secondary Storage
-  Incoming relative path: SeedboxSync/xxx
-  Organized relative path: sex/media/scenes
+Mount Media in Finder first. Example settings (edit for your setup):
+  Stash URL: http://localhost:9999
+  Mounted share: /Volumes/Media
+  Incoming relative path: incoming
+  Organized relative path: media/scenes
 No quotes around paths in prompts. An API key can be entered hidden.
 Saved settings/cache live privately in:
-  ~/Library/Application Support/Adult Content Organizer/
+  ~/Library/Application Support/SmutWorks/ (existing installs keep their legacy location)
 Connection changes preserve saved encoding preferences.
 Reports and action history live in reports/ beside the app. Your API key is
 not written to reports. Existing connection settings survive app updates.
 The /media and /incoming container mounts are assumed to map to the same
-Secondary Storage share, matching your current Docker configuration.
+Media share, as an example Docker configuration; configure mounts for your installation.
 
 MENU REFERENCE
  1  Connection and folder settings
