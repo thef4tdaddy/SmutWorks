@@ -29,10 +29,12 @@ It also supports retrying **Whisparr Sync** for one selected StashDB-linked scen
 
 | Tool | What you get |
 | --- | --- |
-| **Organize scenes** | Preview incoming-file moves using Stash titles and assigned female performers. |
+| **Organize scenes** | Preview incoming-file moves using Stash titles and performers matching configurable gender preferences. |
 | **Find missing metadata** | Flag scenes needing titles or performer information while keeping your other tags. |
 | **Clean up leftovers** | Review empty directories, leftover images, and small files in incoming and organized folders. |
-| **Compare duplicate files** | See resolution, codec, duration, size, and bitrate for files attached to the same scene. |
+| **Review duplicates** | Find attached-file, perceptual-hash, fingerprint, Stash-ID, URL, and title matches; compare copies and recommend keepers. |
+| **Clean up reviewed copies** | Consolidate compatible metadata, set a primary file, and separately quarantine, restore, or delete a recorded non-primary copy. |
+| **Set preferred quality** | Share one quality standard across encoding, discovery, and duplicate recommendations, with optional minimum savings cutoffs. |
 | **Build smarter encoding queues** | Use Stash metadata or cached file scans and prioritize the largest estimated GiB saved. |
 | **Follow every encode** | Keep the current filename, queue position, progress, speed, ETA, and stage above the scrolling log. |
 | **Review the results** | Inspect completed encodes and optionally make a reviewed output primary in Stash. |
@@ -69,9 +71,11 @@ Or [download the alpha source ZIP](https://github.com/thef4tdaddy/SmutWorks/arch
 2. Run **Test connection and folders**.
 3. Start with a preview or read-only report.
 
-Use **↑ / ↓** to select an action and **Enter** to open it. **PgUp / PgDn** scroll the output. A fixed encoding status area stays visible above it.
+Navigate six sections: **Organize · Metadata · Duplicates · Encoding · Cleanup · Settings & History**. Use **↑ / ↓** and **Enter** to open items; **Esc / ←** goes back. Numbers are local to each submenu. **PgUp / PgDn** scroll the task output while encoding status stays pinned above it.
 
-See the [alpha setup guide](https://github.com/thef4tdaddy/SmutWorks/blob/develop/README.md) for path mapping, settings, reports, and upgrades. Current container mapping assumes the same share is available in Stash as `/incoming` and `/media`.
+See the [menu guide](https://github.com/thef4tdaddy/SmutWorks/blob/develop/docs/navigation.md) and [duplicate review workflow](https://github.com/thef4tdaddy/SmutWorks/blob/develop/docs/duplicates.md). Recommendations never automatically delete media; file actions recheck current state and require confirmation.
+
+See the [alpha setup guide](https://github.com/thef4tdaddy/SmutWorks/blob/develop/README.md) for path mapping, settings, reports, and upgrades. Configure the local media root and the equivalent path seen by Stash; fixed Docker mount names are not required.
 
 ## A few things to know
 
@@ -83,7 +87,7 @@ See the [alpha setup guide](https://github.com/thef4tdaddy/SmutWorks/blob/develo
 
 ## Project status & contributing
 
-**Current alpha: `0.1.0-alpha.1`.** Active code and testing are on `develop`; `main` is reserved for stable release code and project information.
+**Current alpha: `0.1.0-alpha.3`.** Active code and testing are on `develop`; `main` is reserved for stable release code and project information.
 
 Have an idea or found something broken? [Open an issue](https://github.com/thef4tdaddy/SmutWorks/issues). Read [CONTRIBUTING.md](CONTRIBUTING.md) before sending a change, and [SECURITY.md](SECURITY.md) before sharing logs or reporting a sensitive problem.
 
