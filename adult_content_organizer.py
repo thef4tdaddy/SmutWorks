@@ -22,7 +22,7 @@ import organizer_journal
 SHARE_ROOT = Path("/Volumes/Media")
 MEDIA_ROOT = SHARE_ROOT / "media/scenes"
 INCOMING_ROOT = SHARE_ROOT / "incoming"
-APP_VERSION = "0.1.0-alpha.4"
+APP_VERSION = "0.1.0-alpha.5"
 # Reuse an existing installation's private state without moving or losing settings.
 LEGACY_STATE_DIR = Path.home() / "Library/Application Support/Adult Content Organizer"
 STATE_DIR = Path(
@@ -1484,7 +1484,7 @@ def perform_choice(choice, settings):
         import duplicate_review  # noqa: E402 -- register actions after core definitions
 
         return duplicate_review.handle(choice, sys.modules[__name__], settings)
-    elif choice in {str(number) for number in range(15, 24)}:
+    elif choice in {str(number) for number in range(15, 24)} | {"31"}:
         import organizer_features  # noqa: E402 -- register actions after core definitions
 
         return organizer_features.handle(choice, sys.modules[__name__], settings)

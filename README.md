@@ -4,7 +4,7 @@
 
 A terminal-based adult media toolkit for **Stash**, **Whisparr Sync**, and **HandBrakeCLI**.
 
-**0.1.0-alpha.4 · macOS · Python 3.8+ · Python standard library only**
+**0.1.0-alpha.5 · macOS · Python 3.8+ · Python standard library only**
 
 Large duplicate collections can use **Duplicates → Bulk duplicate cleanup** to preview keepers and quarantine extras together. Bulk restore/deletion is a separate confirmed action; groups needing manual review are reported.
 
@@ -63,7 +63,11 @@ Both scan methods rank jobs by **estimated bytes saved**, rather than filename o
 
 The fixed status panel shows the **queue file number** separately from HandBrake's internal task counter. It remains independent of log scrolling and changes stage while verifying outputs. Short terminals show fewer header lines.
 
-Encoding currently reads and writes directly on the configured share. Keep the Mac awake and the network share connected. A failed encode or failed verification retains a hidden `.aco-partial-*.mkv` output for inspection; it is not automatically resumed or recovered. Remote monitoring and local staging are not implemented yet.
+Encoding reads and writes directly on the configured share. Keep the Mac awake and the network share connected. The pinned status shows a per-file progress bar, speed/ETA, and separate encoding/verification stages. Verification retries transient read errors and retains detailed diagnostics. A failed file is retained while the queue continues; an unavailable source/share stops the queue.
+
+Completed HandBrake attempts have hidden `.smutworks-encode-*.json` receipts beside their source. A rerun retries pending verification instead of encoding again. Both scanners exclude known attempts and partials; source receipts, existing outputs, and embedded HandBrake metadata prevent repeat processing of recognized files. Metadata can be removed by other tools, so arbitrary renamed older files without receipts/tags cannot always be identified.
+
+For existing partials, open **Encoding → Retry verification / recover outputs**. It searches both roots independently of the current queue. Tracked successful attempts are rechecked; older untracked partials require explicit selection and confirmation. Verification checks readable metadata, HEVC, resolution, runtime, and unchanged files; it does not decode every frame or prove scene identity. Originals remain, and existing targets are never overwritten. Remote monitoring and local staging are not implemented yet.
 
 ## Duplicates
 

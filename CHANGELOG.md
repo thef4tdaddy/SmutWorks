@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.5
+
+- Add adaptive ASCII branding and pinned per-file progress bars; keep progress updates out of log scrollback.
+- Preserve ffprobe diagnostics and retry failed output reads. Retain failed outputs and continue independent jobs, stopping when the source/share becomes unavailable.
+- Record encode attempts beside their sources so verification can be retried without running HandBrake again. Exclude known receipts, partials, existing targets, and embedded HandBrake outputs from encoding discovery.
+- Add verification-only recovery across both roots, including explicitly selected older partials. Keep originals, validate source/output fingerprints and codec/runtime/resolution, and protect existing target files.
+
 ## 0.1.0-alpha.4
 
 - Show scan and completion totals directly in the terminal, including counts, data sizes, skipped groups, keeper changes, and remaining work.

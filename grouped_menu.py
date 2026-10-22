@@ -6,11 +6,13 @@ import sys
 import textwrap
 from typing import Dict, Optional
 
+import terminal_branding
+
 SECTIONS = [
     ("Organize", ["3", "4", "19"]),
     ("Metadata", ["5", "6", "14"]),
     ("Duplicates", ["24", "29", "25", "18", "30", "26", "27", "28"]),
-    ("Encoding", ["17", "10", "11", "12", "22", "23"]),
+    ("Encoding", ["17", "10", "11", "31", "12", "22", "23"]),
     ("Cleanup", ["7", "13", "8"]),
     ("Settings & History", ["1", "2", "15", "9", "16", "20", "21"]),
 ]
@@ -168,16 +170,20 @@ def choose(settings, previous, items, descriptions, version):
                 if section is not None
                 else [s[0] for s in SECTIONS] + ["Exit"]
             )
-            write(1, 2, "SMUTWORKS  " + version, curses.A_BOLD)
-            write(
-                2,
-                2,
-                "Main menu"
-                + ("  /  " + SECTIONS[section][0] if section is not None else ""),
-                curses.A_DIM,
+            banner = terminal_branding.header(
+                width,
+                height,
+                version
+                + " / "
+                + (SECTIONS[section][0] if section is not None else "Main menu"),
             )
+            for offset, line in enumerate(banner):
+                write(
+                    1 + offset, 2, line, curses.A_BOLD if offset == 0 else curses.A_DIM
+                )
+            connection_row = len(banner) + 2
             write(
-                4,
+                connection_row,
                 2,
                 (
                     ("Stash: " + settings["stash_url"])
@@ -186,14 +192,15 @@ def choose(settings, previous, items, descriptions, version):
                 ),
                 curses.A_DIM,
             )
-            rows = max(1, height - 10)
+            menu_top = connection_row + 2
+            rows = max(1, height - menu_top - 4)
             start = max(0, nav.index - rows + 1)
             split = width >= 90
             column = min(45, width // 2) if split else width - 3
             for offset, label in enumerate(labels[start : start + rows]):
                 index = start + offset
                 write(
-                    6 + offset,
+                    menu_top + offset,
                     2,
                     "{} {}  {}".format(
                         ">" if nav.index == index else " ", index + 1, label
@@ -212,10 +219,10 @@ def choose(settings, previous, items, descriptions, version):
             if split:
                 for offset, line in enumerate(
                     textwrap.wrap(description, max(10, width - column - 6))[
-                        : max(1, height - 12)
+                        : max(1, height - menu_top - 5)
                     ]
                 ):
-                    write(6 + offset, column + 2, line)
+                    write(menu_top + offset, column + 2, line)
             write(
                 height - 3,
                 2,

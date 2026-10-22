@@ -15,6 +15,8 @@ import textwrap
 import threading
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+import terminal_branding
+
 
 class TaskConsole(io.TextIOBase):
     aco_capture_subprocess = True
@@ -42,9 +44,14 @@ class TaskConsole(io.TextIOBase):
         while "\n" in self.pending:
             line, self.pending = self.pending.split("\n", 1)
             if re.search(r"Encoding: task .*?\d+(?:\.\d+)?\s*%", line):
+                match = re.search(r"(\d+(?:\.\d+)?)\s*%", line)
                 self.set_encoding_status(
-                    progress=line[line.index("Encoding:") :], stage="Encoding"
+                    progress=line[line.index("Encoding:") :],
+                    stage="Encoding",
+                    percent=float(match.group(1)) if match else 0,
                 )
+                if line.startswith("Encoding:") and "[" not in line:
+                    continue  # Progress stays pinned instead of flooding scrollback.
             self.events.put(("line", line))
         return len(text)
 
@@ -109,9 +116,24 @@ def encoding_header(status, width):
     )
     # Keep a very long filename from consuming the whole pane.
     lines = lines[:2]
-    lines.append(
-        "Stage: {} | Completed: {}".format(
-            status.get("stage", ""), status.get("completed", 0)
+    percent = status.get("percent")
+    if percent is not None:
+        percent = max(0, min(100, float(percent)))
+        slots = max(4, min(32, width - 20))
+        filled = int(slots * percent / 100)
+        lines.append(
+            "Encode [{}{}] {:5.1f}%".format(
+                "#" * filled, "-" * (slots - filled), percent
+            )
+        )
+    lines.extend(
+        textwrap.wrap(
+            "Stage: {} | Completed: {} | Review: {}".format(
+                status.get("stage", ""),
+                status.get("completed", 0),
+                status.get("failed", 0),
+            ),
+            max(8, width),
         )
     )
     if status.get("progress"):
@@ -188,7 +210,10 @@ def run(task, items, selected, status=""):
                     except curses.error:
                         pass
 
-            write(1, 2, "SMUTWORKS", accent)
+            banner = terminal_branding.header(width, height, status)
+            for offset, line in enumerate(banner):
+                write(1 + offset, 2, line, accent if offset == 0 else curses.A_DIM)
+            title_row = len(banner) + 2
             state = (
                 "STOPPING..."
                 if console.cancelled.is_set() and not done
@@ -202,13 +227,12 @@ def run(task, items, selected, status=""):
                     else "WORKING..."
                 )
             )
-            write(2, 2, status, curses.A_DIM)
             split = width >= 80 and height >= 15
             x = min(47, width // 2) if split else 2
-            body_top = 6
-            body_rows = max(1, height - 11)
+            body_top = title_row + 2
+            body_rows = max(1, height - body_top - 5)
             if split:
-                write(4, 2, "ACTIONS", accent)
+                write(title_row, 2, "ACTIONS", accent)
                 selected_index = next(
                     (i for i, item in enumerate(items) if item[0] == selected), 0
                 )
@@ -227,14 +251,14 @@ def run(task, items, selected, status=""):
                         highlight if number == selected else curses.A_DIM,
                         x - 5,
                     )
-                for y in range(4, height - 4):
+                for y in range(title_row, height - 4):
                     try:
                         window.addch(y, x - 2, curses.ACS_VLINE)
                     except curses.error:
                         pass
             title = dict(items).get(selected, "Task")
-            write(4, x, title, accent)
-            write(5, x, state, curses.A_DIM)
+            write(title_row, x, title, accent)
+            write(title_row + 1, x, state, curses.A_DIM)
             available = max(8, width - x - 3)
             if wrap_key != (revision, available):
                 wrapped = []
@@ -249,7 +273,7 @@ def run(task, items, selected, status=""):
             if encoding.get("filename"):
                 pinned = encoding_header(encoding, available)
                 # Reserve log space even on smaller terminals.
-                pinned = pinned[: max(1, body_rows - 2)]
+                pinned = pinned[: max(1, body_rows - 1)]
                 for offset, line in enumerate(pinned):
                     write(body_top + offset, x, line, accent)
                 log_top += len(pinned) + 1

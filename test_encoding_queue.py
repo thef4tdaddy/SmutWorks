@@ -102,8 +102,8 @@ class EncodingTests(unittest.TestCase):
                 q.subprocess, "run"
             ) as process:
                 process.return_value.returncode = 1
-                with self.assertRaises(RuntimeError):
-                    q.run(document)
+                result = q.run(document)
+                self.assertIn("1 failed or awaiting verification", result)
             self.assertEqual(source.read_bytes(), b"source")
             self.assertFalse((root / "test - reencoded.mkv").exists())
 

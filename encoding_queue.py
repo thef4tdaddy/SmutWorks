@@ -7,11 +7,13 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Counter
 
+import encode_recovery
 import organizer_journal
 
 EXTENSIONS = {".mp4", ".mkv", ".mov", ".m4v", ".avi", ".wmv", ".ts", ".webm"}
@@ -179,24 +181,74 @@ def executable(name):
 
 
 def probe(path):
-    result = subprocess.run(
-        [
-            executable("ffprobe"),
-            "-v",
-            "error",
-            "-show_streams",
-            "-show_format",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    try:
+        result = subprocess.run(
+            [
+                executable("ffprobe"),
+                "-v",
+                "error",
+                "-show_streams",
+                "-show_format",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("ffprobe timed out after 60 seconds: " + str(path)) from None
     if result.returncode:
-        raise RuntimeError("ffprobe could not read this file")
-    return json.loads(result.stdout)
+        detail = " ".join((result.stderr or "No diagnostic output").split())[-1200:]
+        raise RuntimeError("ffprobe failed for {}: {}".format(path, detail))
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        raise RuntimeError("ffprobe returned invalid JSON for " + str(path)) from None
+
+
+def verify_output(path, job, target):
+    error = None
+    for attempt in range(3):
+        encoding_status(
+            stage="Verifying output ({}/3)".format(attempt + 1), percent=100
+        )
+        try:
+            before = organizer_journal.fingerprint(path)
+            if not before["size"]:
+                raise RuntimeError("Output is empty: " + str(path))
+            info = details(probe(path))
+            if not organizer_journal.matches(path, before):
+                raise RuntimeError("Output changed during verification: " + str(path))
+            break
+        except (RuntimeError, OSError, ValueError) as failure:
+            error = failure
+            print(
+                "Verification attempt {}/3: {}".format(attempt + 1, failure), flush=True
+            )
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+    else:
+        raise RuntimeError(
+            "Verification still failed after 3 attempts: " + str(error)
+        ) from None
+    duration = float(job.get("duration") or 0)
+    if (
+        info["codec"] != "hevc"
+        or not math.isfinite(info["duration"])
+        or info["duration"] <= 0
+        or not math.isfinite(duration)
+        or duration <= 0
+        or abs(info["duration"] - duration) > max(2, duration * 0.01)
+    ):
+        raise RuntimeError("Output failed codec/duration checks: " + str(path))
+    if (
+        not 0 < info["width"] <= target["width"]
+        or not 0 < info["height"] <= target["height"]
+    ):
+        raise RuntimeError("Output failed resolution checks: " + str(path))
+    return info
 
 
 def details(data):
@@ -240,6 +292,11 @@ def details(data):
     if not depth and match:
         depth = int(match.group(1))
     return {
+        "handbrake": any(
+            "handbrake" in str(value).casefold()
+            for tags in (fmt.get("tags") or {}, video.get("tags") or {})
+            for value in tags.values()
+        ),
         "bit_depth": depth,
         "width": int(video.get("width") or 0),
         "height": int(video.get("height") or 0),
@@ -252,6 +309,8 @@ def details(data):
 
 def reason(info, target=None):
     target = config(target)
+    if info.get("handbrake"):
+        return None, "already encoded by HandBrake (embedded metadata)"
     if (
         not info["width"]
         or not info["height"]
@@ -273,11 +332,9 @@ def reason(info, target=None):
 def valid_cached_info(info):
     return (
         isinstance(info, dict)
-        and set(info)
-        in (
-            {"width", "height", "codec", "video_kbps", "duration", "hdr"},
-            {"width", "height", "codec", "video_kbps", "duration", "hdr", "bit_depth"},
-        )
+        and set(info) - {"bit_depth", "handbrake"}
+        == {"width", "height", "codec", "video_kbps", "duration", "hdr"}
+        and ("handbrake" not in info or isinstance(info["handbrake"], bool))
         and all(
             isinstance(info[key], int) and info[key] >= 0
             for key in ("width", "height", "video_kbps")
@@ -326,6 +383,10 @@ def scan(root, protected, cache=None, checkpoint=None, target=None):
             if os.path.lexists(target):
                 skipped["output already exists"] += 1
                 continue
+            pending = encode_recovery.skip_reason(source)
+            if pending:
+                skipped[pending] += 1
+                continue
             stat = source.stat()
             if time.time() - stat.st_mtime < 600:
                 skipped["modified in last 10 minutes"] += 1
@@ -337,6 +398,7 @@ def scan(root, protected, cache=None, checkpoint=None, target=None):
                     isinstance(cached, dict)
                     and cached.get("signature") == signature
                     and valid_cached_info(cached.get("info"))
+                    and "handbrake" in cached["info"]
                 ):
                     info = cached["info"]
                     reused += 1
@@ -372,6 +434,7 @@ def scan(root, protected, cache=None, checkpoint=None, target=None):
                         "size": stat.st_size,
                         "mtime_ns": stat.st_mtime_ns,
                         "reason": why,
+                        "verify_before_encode": True,
                         **info,
                     }
                 )
@@ -539,7 +602,7 @@ def _run(document, journal_path=None):
         encoder,
         "(software encoding)" if encoder == "x265_10bit" else "(Apple hardware)",
     )
-    completed, skipped = 0, 0
+    completed, skipped, failed = 0, 0, 0
     for position, job in enumerate(rank_jobs(document["jobs"], target_settings), 1):
         encoding_status(
             filename=Path(job["source"]).name,
@@ -547,8 +610,15 @@ def _run(document, journal_path=None):
             total=len(document["jobs"]),
             stage="Checking source",
             progress="",
+            percent=0,
+            completed=completed,
+            failed=failed,
         )
         source, target = Path(job["source"]), Path(job["output"])
+        if "reencoded" in source.stem.casefold() or ".aco-partial-" in source.name:
+            print("SKIP encoded/partial output:", source)
+            skipped += 1
+            continue
         try:
             source.resolve().relative_to(root.resolve())
         except ValueError:
@@ -573,8 +643,32 @@ def _run(document, journal_path=None):
             print("SKIP source changed since preview:", source)
             skipped += 1
             continue
+        receipt = encode_recovery.load(source)
+        if (
+            receipt
+            and receipt.get("status") != "done"
+            and receipt.get("handbrake_completed")
+        ):
+            try:
+                encoding_status(stage="Retrying previous verification", percent=100)
+                encode_recovery.finalize(
+                    sys.modules[__name__], source, receipt, journal_path
+                )
+                completed += 1
+                print("RECOVERED without encoding:", target)
+            except (RuntimeError, OSError) as error:
+                failed += 1
+                print("VERIFICATION PENDING:", source, str(error))
+            continue
+        pending = encode_recovery.skip_reason(source)
+        if pending:
+            print("SKIP:", pending, source)
+            skipped += 1
+            continue
         source_info = None
-        if job.get("verify_before_encode"):
+        if job.get("verify_before_encode") or (
+            "handbrake" not in job and "codec" in job
+        ):
             source_info = details(probe(source))
             _, skip_reason = reason(source_info, target_settings)
             if skip_reason:
@@ -588,6 +682,16 @@ def _run(document, journal_path=None):
             dir=str(source.parent),
         )
         os.close(fd)
+        receipt = {
+            "version": 1,
+            "status": "encoding",
+            "job": job,
+            "partial": partial,
+            "target_settings": target_settings,
+            "source_fingerprint": organizer_journal.fingerprint(source),
+            "handbrake_completed": False,
+        }
+        encode_recovery.save(source, receipt)
         print("ENCODING:", source, flush=True)
         encoding_status(stage="Encoding")
         try:
@@ -598,51 +702,44 @@ def _run(document, journal_path=None):
                 raise RuntimeError(
                     "HandBrake stopped; partial output retained at " + partial
                 )
+            receipt.update(status="verification_pending", handbrake_completed=True)
+            encode_recovery.save(source, receipt)
+            receipt["partial_fingerprint"] = organizer_journal.fingerprint(partial)
+            encode_recovery.save(source, receipt)
             encoding_status(stage="Verifying output", progress="")
-            output_info = details(probe(partial))
-            after = source.stat()
-            if (after.st_size, after.st_mtime_ns) != (
-                before.st_size,
-                before.st_mtime_ns,
-            ):
-                raise RuntimeError(
-                    "Source changed during encoding; partial output retained at "
-                    + partial
-                )
-            if output_info["codec"] != "hevc" or abs(
-                output_info["duration"] - job["duration"]
-            ) > max(2, job["duration"] * 0.01):
-                raise RuntimeError(
-                    "Encoded output did not pass codec/duration checks; retained at "
-                    + partial
-                )
-            # Reserve final name without overwriting any existing file.
-            reserve = os.open(str(target), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.close(reserve)
-            os.replace(partial, target)
-            if journal_path:
-                organizer_journal.append(
-                    journal_path,
-                    {
-                        "kind": "encode",
-                        "status": "done",
-                        "job": job,
-                        "target_settings": target_settings,
-                        "output_info": output_info,
-                        "source_fingerprint": organizer_journal.fingerprint(source),
-                        "output_fingerprint": organizer_journal.fingerprint(target),
-                    },
-                )
+            encode_recovery.finalize(
+                sys.modules[__name__], source, receipt, journal_path
+            )
             completed += 1
             encoding_status(stage="Finished", completed=completed)
             print("FINISHED:", target)
+        except (RuntimeError, OSError) as error:
+            failed += 1
+            receipt["error"] = str(error)
+            if receipt.get("status") != "done":
+                receipt["status"] = (
+                    "verification_pending"
+                    if receipt.get("handbrake_completed")
+                    else "encode_failed"
+                )
+            try:
+                encode_recovery.save(source, receipt)
+            except OSError:
+                pass  # The original receipt remains if the share disconnected.
+            print("RETAINED:", partial, "\nReason:", error, flush=True)
+            encoding_status(stage="Needs verification/review", failed=failed)
+            if not root.is_dir() or not source.is_file():
+                raise RuntimeError(
+                    "NAS/source unavailable; queue stopped. Reconnect and retry verification. "
+                    + str(error)
+                ) from None
         except KeyboardInterrupt:
             raise RuntimeError(
                 "Encoding interrupted; original untouched, partial output at " + partial
             ) from None
     encoding_status(stage="Queue finished", progress="", completed=completed)
-    return "{} encoded; {} stale/conflicting entries skipped. Originals kept.".format(
-        completed, skipped
+    return "{} encoded/recovered; {} entries skipped; {} failed or awaiting verification. Originals kept.".format(
+        completed, skipped, failed
     )
 
 

@@ -39,7 +39,7 @@ python -m ruff check --fix .
 python -m black .
 ```
 
-Black owns formatting; Ruff checks errors, unused imports, and import order. Both target Python 3.8 syntax. mypy checks all ten application modules, including unannotated function bodies. This is gradual typing, not strict typing: JSON/API data remains dynamic, and annotations can be strengthened as code changes. Tests are linted and formatted, but are not part of the mypy target.
+Black owns formatting; Ruff checks errors, unused imports, and import order. Both target Python 3.8 syntax. mypy checks all application modules, including unannotated function bodies. This is gradual typing, not strict typing: JSON/API data remains dynamic, and annotations can be strengthened as code changes. Tests are linted and formatted, but are not part of the mypy target.
 
 Run `pre-commit run --all-files` to check all tracked Python files locally. Hooks may fix files; review and stage those edits before committing again. CI checks formatting without rewriting files, runs mypy, and retains the macOS unit/package smoke tests.
 

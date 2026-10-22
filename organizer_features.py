@@ -8,10 +8,12 @@ import time
 from pathlib import Path
 from typing import Dict
 
+import encode_recovery
 import encoding_queue as encoding
 import organizer_journal as journal
 
 ITEMS = [
+    ("31", "Retry verification / recover outputs"),
     ("15", "Preferred quality profile"),
     ("16", "Open saved reports"),
     ("17", "Build encoding list from Stash"),
@@ -23,6 +25,10 @@ ITEMS = [
     ("23", "Make reviewed encode primary in Stash"),
 ]
 DESCRIPTIONS = {
+    "31": (
+        "ENCODING / RECOVERY",
+        "Verify retained outputs without running HandBrake again. Completed attempts are tracked; older partial files require explicit source/output selection. Originals remain untouched.",
+    ),
     "15": (
         "ENCODING / SETTINGS",
         "Edit bitrate, resolution limits, source bitrate threshold and hardware/software encoder. New lists use these settings; saved lists retain their own settings.",
@@ -176,6 +182,10 @@ def stash_candidates(o, api, target, roots):
                 or source.suffix.lower() not in encoding.EXTENSIONS
             ):
                 skip("output or unsupported file type")
+                continue
+            pending = encode_recovery.skip_reason(source)
+            if pending:
+                skip(pending)
                 continue
             info = {
                 "width": int(file.get("width") or 0),
@@ -951,6 +961,33 @@ def promote_menu(o, api):
 
 
 def handle(choice, o, settings):
+    if choice == "31":
+        if (
+            input("Type VERIFY to retry saved outputs without encoding: ").strip()
+            == "VERIFY"
+        ):
+            import fcntl
+
+            with o.ENCODING_FILE.with_suffix(".lock").open("a") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise RuntimeError(
+                        "Encoding/file changes are already running."
+                    ) from None
+                document = encode_recovery.discover(
+                    encoding,
+                    [o.INCOMING_ROOT, o.MEDIA_ROOT],
+                    encoding.profile(settings),
+                    o.protected_name,
+                )
+                print("{} unfinished sources found.".format(len(document["jobs"])))
+                print(
+                    encode_recovery.recover(
+                        encoding, document, o.REPORTS_DIR / "encode-history.jsonl"
+                    )
+                )
+        return settings
     if choice == "15":
         return settings_menu(o, settings)
     actions = {
