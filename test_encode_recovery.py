@@ -240,3 +240,30 @@ class RecoveryTests(unittest.TestCase):
                 recovery.finalize(q, source, receipt)
         self.assertFalse(Path(self.jobs[0]["output"]).exists())
         self.assertTrue(Path(receipt["partial"]).exists())
+
+    def test_receipts_and_recovery_accept_equivalent_parent_path_aliases(self):
+        alias = self.root / "alias"
+        actual = self.root / "actual"
+        actual.mkdir()
+        alias.symlink_to(actual, target_is_directory=True)
+        source = alias / "clip.mp4"
+        source.write_bytes(b"original")
+        stat = source.stat()
+        job = dict(
+            self.jobs[0],
+            source=str(source),
+            output=str(alias / "clip - reencoded.mkv"),
+            size=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
+        )
+        document = dict(self.document, jobs=[job])
+        with patch.object(q, "execute_encode", side_effect=self.encode), patch.object(
+            q, "probe", side_effect=RuntimeError("read failed")
+        ):
+            q.run(document)
+        canonical_source = actual / "clip.mp4"
+        receipt = recovery.load(canonical_source)
+        self.assertTrue(receipt["handbrake_completed"])
+        with patch.object(q, "probe", return_value=OUTPUT):
+            recovery.finalize(q, canonical_source, receipt)
+        self.assertTrue((actual / "clip - reencoded.mkv").exists())

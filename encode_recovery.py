@@ -45,7 +45,8 @@ def load(source):
         not isinstance(data, dict)
         or data.get("version") != 1
         or not isinstance(data.get("job"), dict)
-        or data["job"].get("source") != str(source)
+        or not isinstance(data["job"].get("source"), str)
+        or Path(data["job"]["source"]).resolve() != Path(source).resolve()
         or not isinstance(data.get("partial"), str)
         or not isinstance(data.get("source_fingerprint"), dict)
         or not isinstance(data.get("target_settings"), dict)
@@ -86,9 +87,9 @@ def finalize(q, source, receipt, journal_path=None):
     partial = Path(receipt["partial"])
     expected = source.with_name(source.stem + " - reencoded.mkv")
     if (
-        target != expected
-        or partial.parent != source.parent
-        or partial not in legacy_partials(source)
+        target.resolve() != expected.resolve()
+        or partial.parent.resolve() != source.parent.resolve()
+        or partial.resolve() not in {p.resolve() for p in legacy_partials(source)}
     ):
         raise RuntimeError("Recovery paths do not match the recorded source.")
     if (
