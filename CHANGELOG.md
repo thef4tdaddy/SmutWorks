@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Retry quarantine and restore verification when Stash or a network mount briefly reports an old path. If the move is verified on disk but Stash still records its original path, scan only that destination and require the original file ID, scene assignment, and keeper to remain intact.
+- Add Duplicates → Recover pending quarantine moves for interrupted moves, including existing pending history. Block another cleanup until pending moves are resolved, and show specific verification failures.
+
 ## 0.1.0-alpha.5
 
 - Add adaptive ASCII branding and pinned per-file progress bars; keep progress updates out of log scrollback.

@@ -208,6 +208,7 @@ def show_results(o, results):
 
 @duplicates.serialized_action
 def apply_plan(o, api, plan):
+    duplicates.require_recovered_moves(o)
     ready = [e for e in plan["entries"] if not e["issue"]]
     results: Dict[str, Any] = {
         "kind": "cleanup",

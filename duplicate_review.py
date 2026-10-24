@@ -6,6 +6,7 @@ import math
 import os
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
@@ -30,6 +31,7 @@ ITEMS = [
     ("26", "Review quarantine / restore"),
     ("27", "Delete one quarantined file"),
     ("28", "Duplicate review settings"),
+    ("32", "Recover pending quarantine moves"),
 ]
 DESCRIPTIONS = {
     key: (
@@ -45,6 +47,10 @@ DESCRIPTIONS["29"] = (
 DESCRIPTIONS["30"] = (
     "DUPLICATES / BULK QUARANTINE",
     "Review a saved list and restore or delete all confirmed quarantined files with one confirmation. Each keeper and file is checked again before changes.",
+)
+DESCRIPTIONS["32"] = (
+    "DUPLICATES / RECOVER MOVES",
+    "Verify pending quarantine or restore moves. Refresh only the moved file in Stash when its path is stale; retain the original file ID and scene. No files are deleted.",
 )
 MODES = {
     "quality": "Best quality (heuristic)",
@@ -811,6 +817,7 @@ def verify_merged_metadata(updated, values, custom, originals):
 
 @serialized_action
 def apply_primary(o, api, document, group, file_id, merge=False):
+    require_recovered_moves(o)
     rows = fresh_group(o, api, document, group)
     if not any(str(v["id"]) == str(file_id) for v in group["files"]):
         raise RuntimeError("Choose a file in this group.")
@@ -960,8 +967,179 @@ def apply_primary(o, api, document, group, file_id, merge=False):
         )
 
 
+def pending_moves(o):
+    return [
+        event
+        for event in journal.latest(o.REPORTS_DIR / "duplicate-history.jsonl")
+        if event["kind"] == "duplicate_quarantine"
+        and event["status"] in ("pending", "restore_pending")
+    ]
+
+
+def require_recovered_moves(o):
+    if pending_moves(o):
+        raise RuntimeError(
+            "An earlier quarantine move is pending. Run Duplicates → Recover pending "
+            "quarantine moves, then rescan before another cleanup."
+        )
+
+
+def confirm_move(o, api, event, restoring=False):
+    """Retry reads, then reconcile only a verified move still recorded at its old path."""
+    source = features.checked_path(o, event["target"] if restoring else event["source"])
+    target = features.checked_path(o, event["source"] if restoring else event["target"])
+    signature = event["signature"]
+
+    def inspect():
+        current = api.file(event["file_id"])
+        problems = []
+        if not current or str(current["id"]) != event["file_id"]:
+            problems.append("Stash did not return the original file ID")
+        elif o.canonical(current["path"]) != target:
+            problems.append(
+                "Stash path: {} (expected {})".format(current["path"], target)
+            )
+        if current and int(current["size"]) != signature["size"]:
+            problems.append("Stash file size differs from the recorded file")
+        if not journal.matches(target, signature):
+            problems.append(
+                "Destination size/timestamp does not match the recorded file"
+            )
+        if os.path.lexists(source):
+            problems.append("Original path still exists: " + str(source))
+        return current, problems
+
+    current, problems = None, []
+    for delay in (0, 0.5, 1):
+        if delay:
+            time.sleep(delay)
+        current, problems = inspect()
+        if not problems:
+            return
+    # Do not scan an unexpected file or accept a move based on filesystem checks alone.
+    if (
+        current
+        and str(current["id"]) == event["file_id"]
+        and o.canonical(current["path"]) == source
+        and int(current["size"]) == signature["size"]
+        and not os.path.lexists(source)
+        and journal.matches(target, signature)
+    ):
+        print(
+            "File moved; refreshing its stale Stash path with a targeted scan...",
+            flush=True,
+        )
+        job_id = api.gql(
+            "mutation($input:ScanMetadataInput!){metadataScan(input:$input)}",
+            {
+                "input": {
+                    "paths": [o.stash_path(target)],
+                    "rescan": False,
+                    "scanGenerateCovers": False,
+                    "scanGeneratePreviews": False,
+                    "scanGenerateImagePreviews": False,
+                    "scanGenerateSprites": False,
+                    "scanGeneratePhashes": False,
+                }
+            },
+        )["metadataScan"]
+        features.wait_job(api, job_id)
+        for delay in (0, 0.5, 1):
+            if delay:
+                time.sleep(delay)
+            current, problems = inspect()
+            if not problems:
+                return
+    raise RuntimeError(
+        "Move verification pending: "
+        + "; ".join(problems)
+        + ". Run Duplicates → Recover pending quarantine moves."
+    )
+
+
+def validate_move_ownership(o, api, event):
+    keeper = features.checked_path(o, event["keeper_path"])
+    if not journal.matches(keeper, event["keeper_signature"]):
+        raise RuntimeError("Keeper changed or is unavailable; recovery blocked.")
+    row = scene(api, event["scene_id"])
+    files = (row.get("files") or []) if row else []
+    if (
+        not files
+        or str(files[0]["id"]) != event["keeper_id"]
+        or o.canonical(files[0]["path"]) != keeper
+    ):
+        raise RuntimeError("Keeper/scene assignment changed; recovery blocked.")
+    extra = next((f for f in files if str(f["id"]) == event["file_id"]), None)
+    if not extra or file_owners(api, extra) != {event["scene_id"]}:
+        raise RuntimeError("File scene assignments changed; recovery blocked.")
+
+
+@serialized_action
+def recover_moves(o, api):
+    events = pending_moves(o)
+    recovered = 0
+    for event in events:
+        try:
+            source = features.checked_path(o, event["source"])
+            target = features.checked_path(o, event["target"])
+            if (
+                not o.beneath(target, o.MEDIA_ROOT / QUARANTINE)
+                or source == target
+                or source.name != target.name
+                or str(event["keeper_id"]) == str(event["file_id"])
+                or Path(event["keeper_path"]) in (source, target)
+            ):
+                raise RuntimeError("Invalid recorded quarantine paths or keeper.")
+            validate_move_ownership(o, api, event)
+            restoring = event["status"] == "restore_pending"
+            old_path, new_path = (target, source) if restoring else (source, target)
+            current = api.file(event["file_id"])
+            if (
+                current
+                and str(current["id"]) == event["file_id"]
+                and o.canonical(current["path"]) == old_path
+                and journal.matches(old_path, event["signature"])
+                and not os.path.lexists(new_path)
+            ):
+                # The API never moved the file; release the pending action without moving it.
+                status = "quarantined" if restoring else "cancelled"
+                journal.append(
+                    o.REPORTS_DIR / "duplicate-history.jsonl",
+                    dict(event, status=status),
+                )
+                recovered += 1
+                print(
+                    "File {}: move was not applied; pending action cleared.".format(
+                        event["file_id"]
+                    )
+                )
+                continue
+            confirm_move(o, api, event, restoring)
+            validate_move_ownership(o, api, event)
+            journal.append(
+                o.REPORTS_DIR / "duplicate-history.jsonl",
+                dict(event, status="restored" if restoring else "quarantined"),
+            )
+            recovered += 1
+            print(
+                "Recovered file {}: {}".format(
+                    event["file_id"], "restored" if restoring else "quarantined"
+                )
+            )
+        except (RuntimeError, OSError) as error:
+            print("File {} still pending: {}".format(event["file_id"], error))
+    print(
+        "Moves recovered: {} | Still pending: {} | Files deleted: 0".format(
+            recovered, len(events) - recovered
+        )
+    )
+    print("Rescan duplicates before another cleanup.")
+    return recovered
+
+
 @serialized_action
 def quarantine(o, api, document, group, file_id):
+    require_recovered_moves(o)
     rows = fresh_group(o, api, document, group)
     if len(rows) != 1:
         raise RuntimeError("Merge to one scene before quarantining files.")
@@ -1008,16 +1186,8 @@ def quarantine(o, api, document, group, file_id):
     event["id"] = journal.append(o.REPORTS_DIR / "duplicate-history.jsonl", event)
     if not api.move(file_id, target.parent):
         raise RuntimeError("Stash did not confirm quarantine. Inspect history/paths.")
-    current = api.file(file_id)
-    if (
-        not current
-        or o.canonical(current["path"]) != target
-        or not journal.matches(target, file["signature"])
-        or source.exists()
-    ):
-        raise RuntimeError(
-            "Quarantine path/content not confirmed. Inspect history before retrying."
-        )
+    confirm_move(o, api, event)
+    validate_move_ownership(o, api, event)
     journal.append(
         o.REPORTS_DIR / "duplicate-history.jsonl", dict(event, status="quarantined")
     )
@@ -1029,6 +1199,7 @@ def quarantine(o, api, document, group, file_id):
 
 @serialized_action
 def quarantine_action(o, api, event, delete=False):
+    require_recovered_moves(o)
     if event.get("status") != "quarantined":
         raise RuntimeError("Only confirmed quarantine entries are eligible.")
     target = features.checked_path(o, event["target"])
@@ -1096,13 +1267,8 @@ def quarantine_action(o, api, event, delete=False):
         )
         if not api.move(event["file_id"], source.parent):
             raise RuntimeError("Restore not confirmed. Inspect paths.")
-        current = api.file(event["file_id"])
-        if (
-            not current
-            or o.canonical(current["path"]) != source
-            or not journal.matches(source, event["signature"])
-        ):
-            raise RuntimeError("Restored path/content not confirmed. Inspect history.")
+        confirm_move(o, api, event, restoring=True)
+        validate_move_ownership(o, api, event)
         journal.append(
             o.REPORTS_DIR / "duplicate-history.jsonl", dict(event, status="restored")
         )
@@ -1238,6 +1404,17 @@ def choose(values, label):
 
 def handle(choice, o, settings):
     api = o.API(settings)
+    if choice == "32":
+        count = len(pending_moves(o))
+        if not count:
+            print("No pending quarantine moves.")
+        elif input(
+            "Type RECOVER {} to verify moves and refresh stale Stash paths: ".format(
+                count
+            )
+        ).strip() == "RECOVER " + str(count):
+            recover_moves(o, api)
+        return settings
     if choice in {"29", "30"}:
         import duplicate_batch
 

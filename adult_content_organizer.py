@@ -1480,7 +1480,7 @@ def perform_choice(choice, settings):
                 print("\n" + path.name + "\n" + path.read_text())
     elif not settings:
         print("Open Settings & History → Connection and folder settings first.")
-    elif choice in {"24", "25", "26", "27", "28", "29", "30"}:
+    elif choice in {"24", "25", "26", "27", "28", "29", "30", "32"}:
         import duplicate_review  # noqa: E402 -- register actions after core definitions
 
         return duplicate_review.handle(choice, sys.modules[__name__], settings)

@@ -648,6 +648,216 @@ class DuplicateTests(DuplicateFixture):
             self.assertRaises(RuntimeError, d.options, {"duplicates": value})
 
 
+class MoveRecoveryTests(DuplicateFixture):
+    def setUp(self):
+        super().setUp()
+        sleeper = patch.object(d.time, "sleep")
+        sleeper.start()
+        self.addCleanup(sleeper.stop)
+
+    def pending_move(self, restoring=False):
+        event = self.quarantine_one()
+        event["status"] = "restore_pending" if restoring else "pending"
+        if restoring:
+            self.api.move(event["file_id"], Path(event["source"]).parent)
+        j.append(self.reports / "duplicate-history.jsonl", event)
+        return event
+
+    def latest_event(self):
+        return j.latest(self.reports / "duplicate-history.jsonl")[-1]
+
+    def stale_path(self, event, restoring=False):
+        old_path = event["target"] if restoring else event["source"]
+        for row in self.api.rows.values():
+            for f in row["files"]:
+                if str(f["id"]) == event["file_id"]:
+                    f["path"] = old_path
+
+    def scanning(self, event, update=True, restoring=False):
+        original = self.api.gql
+
+        def gql(query, variables=None, **kwargs):
+            if "metadataScan(" not in query:
+                return original(query, variables, **kwargs)
+            self.api.calls.append((query, copy.deepcopy(variables)))
+            expected = event["source"] if restoring else event["target"]
+            self.assertEqual(variables["input"]["paths"], [o.stash_path(expected)])
+            if update:
+                for row in self.api.rows.values():
+                    for f in row["files"]:
+                        if str(f["id"]) == event["file_id"]:
+                            f["path"] = expected
+            return {"metadataScan": "repair-job"}
+
+        return patch.object(self.api, "gql", side_effect=gql)
+
+    def test_delayed_api_path_is_retried_without_scan(self):
+        original = self.api.file
+        calls = []
+
+        def delayed(file_id):
+            file = original(file_id)
+            if file_id == "1" and d.QUARANTINE in file["path"]:
+                calls.append(file_id)
+                if len(calls) < 3:
+                    file["path"] = self.file1["path"]
+            return file
+
+        with patch.object(self.api, "file", side_effect=delayed), patch.object(
+            d.features, "wait_job"
+        ) as wait:
+            event = self.quarantine_one()
+        self.assertEqual(event["status"], "quarantined")
+        wait.assert_not_called()
+        self.assertEqual(len(calls), 3)
+
+    def test_recover_completed_move_does_not_move_again_and_is_idempotent(self):
+        event = self.pending_move()
+        with patch.object(self.api, "move") as move:
+            self.assertEqual(d.recover_moves(o, self.api), 1)
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        move.assert_not_called()
+        self.assertEqual(self.latest_event()["status"], "quarantined")
+        self.assertTrue(Path(event["target"]).is_file())
+        self.assertTrue(Path(event["keeper_path"]).is_file())
+
+    def test_recover_stale_database_path_scans_only_moved_file(self):
+        event = self.pending_move()
+        self.stale_path(event)
+        with self.scanning(event), patch.object(d.features, "wait_job") as wait:
+            self.assertEqual(d.recover_moves(o, self.api), 1)
+        wait.assert_called_once_with(self.api, "repair-job")
+        self.assertEqual(self.latest_event()["status"], "quarantined")
+        self.assertEqual(self.api.file(event["file_id"])["path"], event["target"])
+
+    def test_recovery_with_legacy_scene_ownership_queries(self):
+        event = self.pending_move()
+        self.api = LegacyAPI(list(self.api.rows.values()))
+        self.stale_path(event)
+        with self.scanning(event), patch.object(d.features, "wait_job"):
+            self.assertEqual(d.recover_moves(o, self.api), 1)
+        self.assertEqual(self.latest_event()["status"], "quarantined")
+
+    def test_database_size_mismatch_does_not_clear_pending(self):
+        event = self.pending_move()
+        for row in self.api.rows.values():
+            for f in row["files"]:
+                if f["id"] == event["file_id"]:
+                    f["size"] += 1
+        self.assertEqual(d.recover_moves(o, self.api), 0)
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+    def test_quarantine_automatically_reconciles_a_stale_path(self):
+        original_move = self.api.move
+
+        def move(file_id, folder):
+            old = self.api.file(file_id)["path"]
+            result = original_move(file_id, folder)
+            for row in self.api.rows.values():
+                for f in row["files"]:
+                    if f["id"] == file_id:
+                        f["path"] = old
+            return result
+
+        original_gql = self.api.gql
+
+        def gql(query, variables=None, **kwargs):
+            if "metadataScan(" not in query:
+                return original_gql(query, variables, **kwargs)
+            event = self.latest_event()
+            for row in self.api.rows.values():
+                for f in row["files"]:
+                    if f["id"] == event["file_id"]:
+                        f["path"] = event["target"]
+            return {"metadataScan": "repair-job"}
+
+        with patch.object(self.api, "move", side_effect=move), patch.object(
+            self.api, "gql", side_effect=gql
+        ), patch.object(d.features, "wait_job"):
+            event = self.quarantine_one()
+        self.assertEqual(event["status"], "quarantined")
+
+    def test_scan_that_does_not_reconcile_keeps_history_pending(self):
+        event = self.pending_move()
+        self.stale_path(event)
+        with self.scanning(event, update=False), patch.object(d.features, "wait_job"):
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+    def test_failed_scan_keeps_history_pending(self):
+        event = self.pending_move()
+        self.stale_path(event)
+        with self.scanning(event, update=False), patch.object(
+            d.features, "wait_job", side_effect=RuntimeError("scan failed")
+        ):
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+    def test_modified_target_blocks_scan_and_recovery(self):
+        event = self.pending_move()
+        self.stale_path(event)
+        Path(event["target"]).write_bytes(b"changed")
+        with patch.object(d.features, "wait_job") as wait:
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        wait.assert_not_called()
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+    def test_recreated_source_blocks_scan_and_recovery(self):
+        event = self.pending_move()
+        self.stale_path(event)
+        Path(event["source"]).write_bytes(b"new file")
+        with patch.object(d.features, "wait_job") as wait:
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        wait.assert_not_called()
+
+    def test_changed_keeper_blocks_recovery(self):
+        event = self.pending_move()
+        Path(event["keeper_path"]).write_bytes(b"changed")
+        self.assertEqual(d.recover_moves(o, self.api), 0)
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+    def test_shared_file_blocks_recovery(self):
+        event = self.pending_move()
+        for row in self.api.rows.values():
+            for f in row["files"]:
+                if f["id"] == event["file_id"]:
+                    f["scenes"].append({"id": "other"})
+        self.assertEqual(d.recover_moves(o, self.api), 0)
+
+    def test_unmoved_attempt_can_be_cancelled_safely(self):
+        event = self.pending_move()
+        self.api.move(event["file_id"], Path(event["source"]).parent)
+        self.assertEqual(d.recover_moves(o, self.api), 1)
+        self.assertEqual(self.latest_event()["status"], "cancelled")
+        self.assertTrue(Path(event["source"]).is_file())
+
+    def test_interrupted_restore_can_be_recovered(self):
+        event = self.pending_move(restoring=True)
+        self.stale_path(event, restoring=True)
+        with self.scanning(event, restoring=True), patch.object(d.features, "wait_job"):
+            self.assertEqual(d.recover_moves(o, self.api), 1)
+        self.assertEqual(self.latest_event()["status"], "restored")
+        self.assertTrue(Path(event["source"]).is_file())
+
+    def test_pending_move_blocks_another_cleanup(self):
+        self.pending_move()
+        with self.assertRaisesRegex(RuntimeError, "Recover pending"):
+            d.require_recovered_moves(o)
+
+    def test_recovery_refuses_a_different_file_id_at_same_path(self):
+        self.pending_move()
+        original = self.api.file
+
+        def wrong_id(file_id):
+            result = original(file_id)
+            result["id"] = "unrelated"
+            return result
+
+        with patch.object(self.api, "file", side_effect=wrong_id):
+            self.assertEqual(d.recover_moves(o, self.api), 0)
+        self.assertEqual(self.latest_event()["status"], "pending")
+
+
 class ExtraGuardTests(DuplicateFixture):
     def test_actions_share_the_encoding_queue_lock(self):
         import fcntl

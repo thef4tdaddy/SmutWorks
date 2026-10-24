@@ -67,6 +67,14 @@ It remains attached in Stash, so its path stays synchronized. The primary cannot
 
 Rescan after each action. Native Stash update hooks can run; unexpected path/content changes leave a pending history entry for manual inspection.
 
+### Recover an interrupted move
+
+If a move reports a verification failure, open **Duplicates → Recover pending quarantine moves** and type the displayed `RECOVER <count>` confirmation. This also handles pending entries written by earlier versions. Do not manually edit the history or move the video again.
+
+SmutWorks retries path checks after native moves. When the original is gone and the destination matches the recorded size and modification time, but Stash still reports the original path, it scans only that destination with preview generation disabled. Recovery requires the same Stash file ID, original scene assignment, and unchanged primary keeper before recording success. A new file ID, shared file, changed keeper, occupied source, or mismatching destination leaves the entry pending with a specific reason. An unchanged move that never happened can be cancelled without moving any files.
+
+The recovery summary shows resolved and still-pending counts. No files are deleted. Pending moves block further duplicate changes. After recovery, run **Find duplicate groups** again before **Bulk duplicate cleanup**; confirmed quarantined copies remain available under the restore/delete actions.
+
 ### Restore or delete later
 
 - **Review quarantine / restore** returns one recorded, unchanged file to its original location through Stash. Occupied destinations are never overwritten.
